@@ -35,6 +35,5 @@ bucket_name = "pulsesign-files"
 
 [[kv_namespaces]]
 binding = "SESSION"
-# Required by the Astro adapter even though nothing reads it. Replace with the
-# ID from `npx wrangler kv namespace create pulsesign-session`.
-id = "00000000000000000000000000000000"
+# Required by the Astro adapter even though nothing reads it.
+id = "5bcd7b6ce1c94e40875e58116683b049"
