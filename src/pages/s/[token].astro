@@ -1,0 +1,847 @@
+---
+import Base from '../../layouts/Base.astro';
+import Logo from '../../components/Logo.astro';
+import LangToggle from '../../components/LangToggle.astro';
+import { dict, fill } from '../../lib/i18n';
+import { ACTIVE, getSigners, getUser } from '../../lib/docs';
+import { resolveSigner } from '../../lib/signer-session';
+import { displayName } from '../../lib/auth';
+import { orgName } from '../../lib/env';
+import { describeUserAgent, formatDate, initials } from '../../lib/format';
+
+const lang = Astro.locals.lang;
+const t = dict(lang);
+const token = Astro.params.token!;
+const ctx = await resolveSigner(Astro.request, token);
+const org = orgName();
+const reasons = [t.r1, t.r2, t.r3];
+
+type View = 'dead' | 'flow' | 'done' | 'declined';
+let view: View = 'dead';
+let initialStep = 'landing';
+let senderName = '';
+let senderEmail = '';
+let nextName = '';
+if (ctx) {
+  const { doc, signer } = ctx;
+  if (signer.status === 'signed') view = 'done';
+  else if (signer.status === 'declined') view = 'declined';
+  else if (ACTIVE.includes(doc.status) && (signer.status === 'sent' || signer.status === 'opened')) {
+    view = 'flow';
+    if (ctx.verified) initialStep = signer.consent_at ? 'review' : 'consent';
+  }
+  const owner = await getUser(doc.owner_email);
+  senderName = displayName(owner);
+  senderEmail = owner.email;
+  if (view === 'done' && doc.status !== 'completed') {
+    const next = (await getSigners(doc.id)).find((s) => s.status === 'sent' || s.status === 'opened');
+    nextName = next && doc.sequential ? next.name : '';
+  }
+}
+const doc = ctx?.doc;
+const signer = ctx?.signer;
+const maskEmail = (e: string) => {
+  const [u, d] = e.split('@');
+  return `${u.slice(0, 1)}${'•'.repeat(Math.max(3, Math.min(6, u.length - 1)))}@${d}`;
+};
+const clientConfig = ctx
+  ? {
+      token,
+      step: initialStep,
+      signerName: signer!.name,
+      initials: initials(signer!.name, signer!.email),
+      today: formatDate(Date.now(), lang),
+      email: signer!.email,
+    }
+  : null;
+---
+<Base title={doc ? doc.title : t.linkDeadTitle} clientStrings>
+  <header class="s-head">
+    <Logo size={30} />
+    <LangToggle />
+  </header>
+
+  <main class="s-main">
+    {
+      view === 'dead' && (
+        <div class="card s-card center">
+          <div class="big-icon bad">!</div>
+          <h1 class="s-h1">{t.linkDeadTitle}</h1>
+          <p class="muted">{t.linkDead}</p>
+        </div>
+      )
+    }
+
+    {
+      view === 'declined' && (
+        <div class="card s-card center">
+          <div class="big-icon bad">×</div>
+          <h1 class="s-h1">{t.declinedTitle}</h1>
+          <p class="muted">{fill(t.declinedBody, { org })}</p>
+          {signer!.decline_reason && <p class="quote">“{signer!.decline_reason}”</p>}
+        </div>
+      )
+    }
+
+    {
+      view === 'done' && doc && signer && (
+        <div class="done">
+          <div class="done-icon">
+            <svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="#FF7A12" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
+          </div>
+          <h1 class="s-h1">{t.doneTitle}</h1>
+          <p class="muted done-body">
+            {doc.status === 'completed' ? t.doneBodyFinal : t.doneBody}
+            <br />
+            <strong style="color:var(--ink)">{signer.email}</strong>
+          </p>
+          <div class="card s-card">
+            <h2 class="done-title">{doc.title}</h2>
+            <dl class="facts">
+              <div><dt>{t.docId}</dt><dd class="mono">{doc.id}</dd></div>
+              <div><dt>{t.signedAt}</dt><dd class="mono">{signer.signed_at ? formatDate(signer.signed_at, lang, { time: true, seconds: true }) : '—'}</dd></div>
+              <div><dt>IP · {t.device}</dt><dd class="mono">{signer.ip} · {describeUserAgent(signer.user_agent)}</dd></div>
+              <div><dt>{t.identity}</dt><dd>{t.otpVerified}</dd></div>
+            </dl>
+            {doc.status === 'completed' && doc.hash_final && (
+              <div class="hash-box">
+                <span class="label">{t.hashAfter}</span>
+                <div class="mono hash-text">{doc.hash_final}</div>
+              </div>
+            )}
+            {nextName && <div class="next">{fill(t.nextSigner, { name: nextName })}</div>}
+            {!nextName && doc.status !== 'completed' && <div class="next">{t.waitingOthers}</div>}
+            <div class="done-actions">
+              {ctx!.verified && doc.status === 'completed' && doc.final_key && (
+                <a class="btn" href={`/api/sign/${token}/file?download`}>{t.downloadCopy}</a>
+              )}
+              <a class="btn btn-soft" href="/verify">{t.verifyLink}</a>
+            </div>
+          </div>
+          <p class="small muted powered">{t.poweredBy}</p>
+        </div>
+      )
+    }
+
+    {
+      view === 'flow' && doc && signer && (
+        <>
+          <script type="application/json" id="signer-config" set:html={JSON.stringify(clientConfig).replace(/</g, '\\u003c')} />
+
+          <section class="card s-card" data-step="landing" hidden>
+            <div class="sender">
+              <span class="sender-avatar">{initials(org, '')}</span>
+              <div>
+                <strong>{org}</strong>
+                <span class="small muted">{senderName} · {senderEmail}</span>
+              </div>
+            </div>
+            <p class="small muted" style="margin:22px 0 4px">{t.reqSign}</p>
+            <h1 class="s-h1">{doc.title}</h1>
+            <div class="tags">
+              <span class="tag">{doc.pages} {t.pagesUnit}</span>
+              {doc.expires_at && <span class="tag" style="background:var(--peach);color:var(--peach-ink)">{t.expires} {formatDate(doc.expires_at, lang)}</span>}
+              <span class="tag mono">{doc.id}</span>
+            </div>
+            {doc.message.trim() && (
+              <div class="msg">
+                <span class="small" style="font-weight:600;color:var(--muted)">{t.messageFrom}</span>
+                <p>{doc.message}</p>
+              </div>
+            )}
+            <ol class="landing-steps">
+              {[t.stepVerify, t.stepConsent, t.stepSign].map((l, i) => (
+                <li>
+                  <span class="num-dot" style="background:var(--mint);width:28px;height:28px">{i + 1}</span>
+                  {l}
+                </li>
+              ))}
+            </ol>
+            <button class="btn btn-block btn-lg" type="button" id="start">{t.start}</button>
+            <button class="link-btn decline-link" type="button" data-decline>{t.decline}</button>
+          </section>
+
+          <div class="stepper" id="stepper" hidden>
+            {[t.stepVerify, t.stepConsent, t.stepSign].map((l, i) => (
+              <div class="sstep" data-i={i}>
+                <div class="sbar" />
+                <span>{l}</span>
+              </div>
+            ))}
+          </div>
+
+          <section class="card s-card" data-step="otp" hidden>
+            <h1 class="s-h1">{t.otpTitle}</h1>
+            <p class="muted">
+              {t.otpSent} <strong style="color:var(--ink)">{maskEmail(signer.email)}</strong>
+            </p>
+            <label class="otp" for="otp-input">
+              <input id="otp-input" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]*" aria-label={t.otpTitle} />
+              {[0, 1, 2, 3, 4, 5].map(() => <span class="box" />)}
+            </label>
+            <p class="small err" id="otp-error" hidden />
+            <button class="btn btn-block btn-lg" type="button" id="verify-otp" disabled>{t.verify}</button>
+            <button class="link-btn resend" type="button" id="resend">{t.resendCode}</button>
+          </section>
+
+          <section class="card s-card" data-step="consent" hidden>
+            <h1 class="s-h1">{t.consentTitle}</h1>
+            <label class="consent">
+              <input type="checkbox" id="consent-box" />
+              <span class="check">✓</span>
+              <span>{t.consentBox}</span>
+            </label>
+            <div class="pdpa">
+              <span class="pdpa-tag">PDPA</span>
+              <span class="small muted">{fill(t.pdpa, { org })}</span>
+            </div>
+            <button class="btn btn-block btn-lg" type="button" id="consent-next" disabled>{t.continue}</button>
+          </section>
+
+          <section data-step="review" class="review" hidden>
+            <div class="review-head">
+              <div>
+                <strong>{doc.title}</strong>
+                <span class="small muted">{t.sentBy} {org}</span>
+              </div>
+              <button class="link-btn small decline-link" type="button" data-decline>{t.decline}</button>
+            </div>
+            <div class="pdf-pages" id="sign-pages"><div class="pdf-loading">{t.loadingPdf}</div></div>
+          </section>
+        </>
+      )
+    }
+  </main>
+
+  {
+    view === 'flow' && (
+      <>
+        <div class="signbar" id="signbar" hidden>
+          <div class="sb-info">
+            <span id="sb-label" />
+            <span class="sb-track"><span id="sb-fill" /></span>
+          </div>
+          <button class="btn btn-lg" type="button" id="sb-action" />
+        </div>
+
+        <div class="overlay sheet" id="sig-sheet" hidden>
+          <div class="modal sig-modal">
+            <div class="sheet-head">
+              <h2 id="sheet-title">{t.yourSig}</h2>
+              <button class="close" type="button" data-close aria-label={t.cancel}>×</button>
+            </div>
+            <div class="tabs3" role="tablist">
+              <button type="button" data-tab="draw" class="on">{t.draw}</button>
+              <button type="button" data-tab="type">{t.type}</button>
+              <button type="button" data-tab="upload">{t.upload}</button>
+            </div>
+            <div data-panel="draw">
+              <div class="pad">
+                <canvas id="pad" />
+                <span class="pad-line" />
+                <span class="pad-hint">{t.drawHint}</span>
+                <button class="link-btn small pad-clear" type="button" id="pad-clear">{t.clear}</button>
+              </div>
+            </div>
+            <div data-panel="type" hidden>
+              <input class="input" id="typed" maxlength="60" />
+              <div class="typed-preview" id="typed-preview" />
+            </div>
+            <div data-panel="upload" hidden>
+              <label class="upload-box">
+                <input type="file" accept="image/png,image/jpeg" id="sig-file" class="sr-only" />
+                <img id="sig-file-preview" alt="" hidden />
+                <span id="sig-file-empty">
+                  <strong>{t.uploadImg}</strong>
+                  <br />
+                  <span class="small muted">{t.uploadImgSub}</span>
+                </span>
+              </label>
+            </div>
+            <p class="small muted sig-legal">{t.sigLegal}</p>
+            <div class="sheet-actions">
+              <button class="btn btn-soft" type="button" data-close>{t.cancel}</button>
+              <button class="btn" type="button" id="adopt">{t.useSig}</button>
+            </div>
+          </div>
+        </div>
+      </>
+    )
+  }
+
+  {
+    ctx && ['flow'].includes(view) && (
+      <div class="overlay sheet" id="decline-sheet" hidden>
+        <div class="modal">
+          <h2>{t.declineTitle}</h2>
+          <p class="small muted">{t.declineSub}</p>
+          <div class="reasons">
+            {reasons.map((r) => (
+              <button type="button" data-reason={r}>{r}</button>
+            ))}
+          </div>
+          <textarea class="textarea" id="decline-note" placeholder={t.reason} maxlength="900" rows="3" />
+          <div class="sheet-actions">
+            <button class="btn btn-soft" type="button" data-close>{t.cancel}</button>
+            <button class="btn btn-danger-solid" type="button" id="confirm-decline" disabled>{t.confirmDecline}</button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  {view === 'flow' && <p class="small faint private">{t.linkPrivate}</p>}
+</Base>
+
+<script>
+  import '../../scripts/signer';
+</script>
+
+<style>
+  .s-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--mint-line);
+    background: var(--bg);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  .s-main {
+    max-width: 560px;
+    margin: 0 auto;
+    padding: 22px 16px 40px;
+  }
+  .s-main:has(.review:not([hidden])) {
+    max-width: 920px;
+    padding-bottom: 140px;
+  }
+  .s-card {
+    padding: 26px;
+    border-radius: 28px;
+    box-shadow: 0 10px 40px rgba(0, 65, 47, 0.07);
+  }
+  .center {
+    text-align: center;
+  }
+  .s-h1 {
+    font-size: 24px;
+    line-height: 1.4;
+  }
+  .big-icon {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 6px auto 16px;
+    font-size: 28px;
+    font-weight: 700;
+  }
+  .big-icon.bad {
+    background: var(--danger-bg);
+    color: var(--danger);
+  }
+  .quote {
+    background: var(--mint-3);
+    border-radius: 14px;
+    padding: 12px 16px;
+  }
+  .sender {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+  }
+  .sender div {
+    display: flex;
+    flex-direction: column;
+  }
+  .sender-avatar {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: var(--forest);
+    color: #fff;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+  }
+  .tags {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin: 16px 0 18px;
+  }
+  .msg {
+    background: var(--mint-2);
+    border-radius: 18px;
+    padding: 14px 16px;
+  }
+  .msg p {
+    margin: 6px 0 0;
+    white-space: pre-wrap;
+  }
+  .landing-steps {
+    list-style: none;
+    padding: 0;
+    margin: 20px 0 22px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .landing-steps li {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .decline-link {
+    display: block;
+    margin: 16px auto 0;
+    color: var(--danger);
+  }
+  .review-head .decline-link {
+    margin: 0;
+  }
+  .stepper {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin: 0 0 18px;
+  }
+  .sstep {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--faint);
+  }
+  .sbar {
+    height: 5px;
+    border-radius: 999px;
+    background: var(--mint);
+    margin-bottom: 8px;
+  }
+  .sstep.on {
+    color: var(--forest);
+  }
+  .sstep.on .sbar {
+    background: var(--forest);
+  }
+  .otp {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 8px;
+    margin: 24px 0 10px;
+    cursor: text;
+  }
+  .otp input {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    font-size: 16px;
+    letter-spacing: 2em;
+  }
+  .otp .box {
+    height: 58px;
+    border-radius: 14px;
+    background: var(--mint-2);
+    border: 2px solid transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-mono);
+    font-size: 24px;
+    font-weight: 600;
+  }
+  .otp .box.cur {
+    background: var(--peach);
+    border-color: var(--pulse);
+  }
+  .err {
+    color: var(--danger);
+    margin: 0 0 10px;
+  }
+  .resend {
+    display: block;
+    margin: 16px auto 0;
+  }
+  .consent {
+    display: flex;
+    gap: 12px;
+    border: 2px solid #d3e3d9;
+    border-radius: 18px;
+    padding: 16px;
+    margin: 20px 0 14px;
+    cursor: pointer;
+    line-height: 1.6;
+  }
+  .consent input {
+    position: absolute;
+    opacity: 0;
+  }
+  .consent .check {
+    width: 24px;
+    height: 24px;
+    border-radius: 7px;
+    border: 2px solid #b8d0c1;
+    flex: none;
+    color: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 700;
+    margin-top: 2px;
+  }
+  .consent:has(input:checked) {
+    border-color: var(--forest);
+    background: var(--mint-2);
+  }
+  .consent:has(input:checked) .check {
+    background: var(--forest);
+    border-color: var(--forest);
+    color: #fff;
+  }
+  .consent:has(input:focus-visible) {
+    outline: 2px solid var(--pulse);
+  }
+  .pdpa {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    margin-bottom: 20px;
+  }
+  .pdpa-tag {
+    background: var(--mint);
+    color: var(--forest);
+    font-size: 11px;
+    font-weight: 700;
+    border-radius: 6px;
+    padding: 3px 6px;
+    flex: none;
+  }
+  .review-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+  .review-head div {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  :global(.sfld) {
+    position: absolute;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+    font-weight: 600;
+    color: var(--peach-ink);
+    font-size: clamp(9px, 1.4cqw, 13px);
+    border: 2px dashed #ffb27a;
+    background: #fff6ee;
+  }
+  :global(.sfld.active) {
+    border: 2px solid var(--pulse);
+    background: var(--peach);
+    box-shadow: 0 0 0 5px rgba(255, 122, 18, 0.18);
+  }
+  :global(.sfld.filled) {
+    border: 1.5px solid transparent;
+    background: transparent;
+  }
+  :global(.sfld.filled:hover) {
+    border-color: #ffb27a;
+  }
+  :global(.sfld img) {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+  }
+  :global(.sfld .txt) {
+    color: var(--ink);
+    font-weight: 400;
+    font-size: clamp(8px, 1.6cqw, 15px);
+    white-space: nowrap;
+  }
+  :global(.sfld .flag) {
+    position: absolute;
+    left: -2px;
+    top: -24px;
+    background: var(--pulse);
+    color: var(--pulse-ink);
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 6px 6px 6px 0;
+    white-space: nowrap;
+  }
+  .signbar {
+    position: fixed;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: 16px;
+    width: min(920px, calc(100% - 24px));
+    background: #fff;
+    border-radius: 999px;
+    box-shadow: 0 10px 40px rgba(0, 65, 47, 0.18);
+    padding: 10px 10px 10px 24px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    z-index: 30;
+  }
+  .sb-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-weight: 600;
+    font-size: 14px;
+    min-width: 0;
+  }
+  .sb-track {
+    height: 5px;
+    background: var(--mint);
+    border-radius: 999px;
+    overflow: hidden;
+  }
+  #sb-fill {
+    display: block;
+    height: 100%;
+    background: var(--forest);
+    width: 0;
+    transition: width 0.25s;
+  }
+  .sig-modal {
+    max-width: 560px;
+  }
+  .sheet-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .close {
+    border: 0;
+    background: var(--mint-2);
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    font-size: 18px;
+    cursor: pointer;
+  }
+  .tabs3 {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    background: var(--mint-2);
+    border-radius: 999px;
+    padding: 4px;
+    margin: 16px 0;
+  }
+  .tabs3 button {
+    border: 0;
+    background: transparent;
+    border-radius: 999px;
+    padding: 8px;
+    font-weight: 600;
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .tabs3 button.on {
+    background: #fff;
+    color: var(--forest);
+  }
+  .pad {
+    position: relative;
+    background: var(--mint-3);
+    border-radius: 18px;
+    height: 200px;
+    border: 1.5px solid var(--mint-line);
+  }
+  .pad canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    touch-action: none;
+    cursor: crosshair;
+  }
+  .pad-line {
+    position: absolute;
+    left: 24px;
+    right: 24px;
+    bottom: 48px;
+    border-bottom: 1.5px dashed #b8d0c1;
+    pointer-events: none;
+  }
+  .pad-hint {
+    position: absolute;
+    left: 24px;
+    bottom: 22px;
+    font-size: 12px;
+    color: var(--faint);
+    pointer-events: none;
+  }
+  .pad-clear {
+    position: absolute;
+    right: 16px;
+    top: 12px;
+  }
+  .typed-preview {
+    height: 140px;
+    margin-top: 12px;
+    background: var(--mint-3);
+    border-radius: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Sriracha', cursive;
+    font-size: 46px;
+    color: var(--ink);
+    overflow: hidden;
+    white-space: nowrap;
+    padding: 0 16px;
+  }
+  .upload-box {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    height: 180px;
+    border: 2px dashed #a9cdb8;
+    border-radius: 18px;
+    cursor: pointer;
+    padding: 12px;
+  }
+  .upload-box img {
+    max-width: 100%;
+    max-height: 100%;
+  }
+  .sig-legal {
+    margin: 14px 0;
+  }
+  .sheet-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 14px;
+  }
+  .reasons {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 16px 0 12px;
+  }
+  .reasons button {
+    text-align: left;
+    border: 1.5px solid var(--mint-line);
+    background: #fff;
+    border-radius: 14px;
+    padding: 12px 14px;
+    cursor: pointer;
+    font-weight: 500;
+  }
+  .reasons button.on {
+    border-color: var(--danger);
+    background: var(--danger-bg);
+  }
+  .private {
+    text-align: center;
+    margin: 0 0 30px;
+  }
+  .done {
+    text-align: center;
+  }
+  .done-icon {
+    width: 88px;
+    height: 88px;
+    border-radius: 50%;
+    background: var(--forest);
+    box-shadow: 0 0 0 10px var(--mint);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 18px auto 26px;
+  }
+  .done-body {
+    margin: 10px 0 22px;
+  }
+  .done .s-card {
+    text-align: left;
+  }
+  .done-title {
+    font-size: 18px;
+    margin-bottom: 16px;
+  }
+  .facts {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin: 0 0 16px;
+  }
+  .facts dt {
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .facts dd {
+    margin: 2px 0 0;
+    font-size: 14px;
+    word-break: break-word;
+  }
+  .hash-box {
+    background: var(--mint-2);
+    border-radius: 16px;
+    padding: 14px 16px;
+    margin-bottom: 14px;
+  }
+  .hash-text {
+    font-size: 12.5px;
+    color: var(--forest);
+    word-break: break-all;
+  }
+  .next {
+    background: var(--peach);
+    color: var(--peach-ink);
+    border-radius: 14px;
+    padding: 12px 16px;
+    font-size: 14px;
+    margin-bottom: 14px;
+  }
+  .done-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .done-actions .btn:only-child {
+    grid-column: 1 / -1;
+  }
+  .powered {
+    margin-top: 18px;
+  }
+  @media (max-width: 560px) {
+    .facts,
+    .done-actions {
+      grid-template-columns: 1fr;
+    }
+    .s-card {
+      padding: 22px 18px;
+    }
+    .signbar {
+      border-radius: 24px;
+      padding: 12px;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 10px;
+      bottom: 10px;
+    }
+  }
+</style>

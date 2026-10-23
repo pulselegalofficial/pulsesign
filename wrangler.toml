@@ -1,0 +1,40 @@
+# Cloudflare Workers configuration for Pulse Sign.
+#
+# `astro build` writes the deployable config to dist/server/wrangler.json
+# from this file, so `wrangler deploy` picks up the right entrypoint.
+#
+# Binding names must match the code (src/lib/env.ts). Secrets (RESEND_API_KEY)
+# are set on the Worker in the dashboard, never here.
+account_id = "49a31ae40cc2b778e7678b445bc5e6b1"
+name = "pulsesign"
+compatibility_date = "2026-08-19"
+compatibility_flags = ["nodejs_compat"]
+
+# PDF stamping runs in the Worker and needs far more than the Free plan's
+# 10 ms of CPU per request. Requires Workers Paid (30 s by default).
+
+[vars]
+# Public URL the signing links in emails point at, no trailing slash.
+APP_URL = "https://sign.pulselegal.co"
+ORG_NAME = "Pulse Legal"
+# Who may sign in to the staff dashboard. Comma separated. An entry starting
+# with "@" allows a whole domain, e.g. "@pulselegal.co".
+STAFF_EMAILS = "@pulselegal.co"
+EMAIL_FROM = "Pulse Sign <sign@pulselegal.co>"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "pulsesign"
+# Replace with the ID from `npx wrangler d1 create pulsesign` (see README).
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "pulsesign-files"
+
+[[kv_namespaces]]
+binding = "SESSION"
+# Required by the Astro adapter even though nothing reads it. Replace with the
+# ID from `npx wrangler kv namespace create pulsesign-session`.
+id = "00000000000000000000000000000000"

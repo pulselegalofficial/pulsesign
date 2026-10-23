@@ -1,0 +1,274 @@
+---
+import Base from './Base.astro';
+import Logo from '../components/Logo.astro';
+import LangToggle from '../components/LangToggle.astro';
+import { dict } from '../lib/i18n';
+import { displayName } from '../lib/auth';
+import { initials } from '../lib/format';
+interface Props {
+  title: string;
+  active?: 'docs' | 'verify' | 'none';
+  clientStrings?: boolean;
+  /** The wizard has its own action bar at the bottom on phones. */
+  bottomNav?: boolean;
+}
+const { title, active = 'docs', clientStrings = false, bottomNav = true } = Astro.props;
+const t = dict(Astro.locals.lang);
+const user = Astro.locals.user!;
+const name = displayName(user);
+const ini = initials(user.name, user.email);
+---
+<Base title={title} clientStrings={clientStrings}>
+  <div class="app">
+    <aside class="side">
+      <Logo href="/" />
+      <a class="btn btn-pulse btn-block new-btn" href="/new">+ {t.newDoc}</a>
+      <nav class="side-nav">
+        <a href="/" class={active === 'docs' ? 'on' : ''}>{t.navDocs}</a>
+        <a href="/verify" class={active === 'verify' ? 'on' : ''}>{t.navVerify}</a>
+      </nav>
+      <div class="side-foot">
+        <LangToggle />
+        <button class="me" type="button" data-edit-name title={t.editName}>
+          <span class="avatar">{ini}</span>
+          <span class="me-text">
+            <strong>{name}</strong>
+            <span>{user.email}</span>
+          </span>
+        </button>
+        <form method="post" action="/api/auth/logout">
+          <button class="link-btn logout" type="submit">{t.logout}</button>
+        </form>
+      </div>
+    </aside>
+
+    <header class="topbar">
+      <Logo href="/" size={30} />
+      <div class="topbar-right">
+        <LangToggle />
+        <button class="avatar" type="button" data-edit-name title={t.editName}>{ini}</button>
+      </div>
+    </header>
+
+    <main class="main">
+      <slot />
+    </main>
+
+    <nav class="bottom-nav" hidden={!bottomNav}>
+      <a href="/" class={active === 'docs' ? 'on' : ''}>{t.navDocs}</a>
+      <a href="/new" class="plus" aria-label={t.newDoc}>+</a>
+      <a href="/verify" class={active === 'verify' ? 'on' : ''}>{t.navVerify}</a>
+    </nav>
+  </div>
+
+  <div class="overlay" id="name-dialog" hidden>
+    <form class="modal" id="name-form">
+      <h2>{t.editName}</h2>
+      <div class="field" style="margin:18px 0">
+        <label for="display-name">{t.displayName}</label>
+        <input class="input" id="display-name" name="name" maxlength="120" value={user.name} placeholder={name} />
+        <p class="small faint" style="margin:8px 0 0">{user.email}</p>
+      </div>
+      <div style="display:flex;gap:10px;justify-content:space-between;flex-wrap:wrap">
+        <button class="link-btn logout" type="button" id="logout-mobile">{t.logout}</button>
+        <div style="display:flex;gap:10px">
+          <button class="btn btn-soft" type="button" data-close>{t.cancel}</button>
+          <button class="btn" type="submit">{t.save}</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</Base>
+
+<script>
+  const dialog = document.getElementById('name-dialog')!;
+  document.querySelectorAll('[data-edit-name]').forEach((b) =>
+    b.addEventListener('click', () => {
+      dialog.hidden = false;
+      (document.getElementById('display-name') as HTMLInputElement).focus();
+    })
+  );
+  dialog.addEventListener('click', (e) => {
+    if (e.target === dialog || (e.target as HTMLElement).closest('[data-close]')) dialog.hidden = true;
+  });
+  document.getElementById('name-form')!.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = (document.getElementById('display-name') as HTMLInputElement).value;
+    const res = await fetch('/api/me', { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }) });
+    if (res.ok) location.reload();
+  });
+  document.getElementById('logout-mobile')!.addEventListener('click', async () => {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    location.href = '/login';
+  });
+</script>
+
+<style>
+  .app {
+    min-height: 100vh;
+    display: grid;
+    grid-template-columns: 260px minmax(0, 1fr);
+  }
+  .side {
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    background: #fff;
+    padding: 24px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+  .side :global(.logo) {
+    padding-left: 6px;
+  }
+  .side-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .side-nav a,
+  .bottom-nav a {
+    text-decoration: none;
+    color: var(--muted);
+    font-weight: 600;
+    padding: 12px 14px;
+    border-radius: 14px;
+  }
+  .side-nav a.on {
+    background: var(--mint);
+    color: var(--forest);
+  }
+  .side-nav a:hover {
+    color: var(--forest);
+  }
+  .side-foot {
+    margin-top: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    align-items: flex-start;
+  }
+  .side-foot :global(.seg) {
+    background: var(--mint-2);
+  }
+  .me {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    background: var(--mint-2);
+    border: 0;
+    border-radius: 16px;
+    padding: 10px;
+    cursor: pointer;
+    text-align: left;
+  }
+  .me-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .me-text strong {
+    font-size: 14px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .me-text span {
+    font-size: 12px;
+    color: var(--muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: var(--peach);
+    color: var(--peach-ink);
+    font-weight: 700;
+    font-size: 13px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    border: 0;
+    cursor: pointer;
+  }
+  .logout {
+    font-size: 13px;
+    color: var(--muted);
+    font-weight: 500;
+    padding-left: 8px;
+  }
+  .main {
+    padding: 36px 40px 120px;
+    min-width: 0;
+  }
+  .topbar,
+  .bottom-nav {
+    display: none;
+  }
+  @media (max-width: 900px) {
+    .app {
+      display: block;
+    }
+    .side {
+      display: none;
+    }
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      background: var(--bg);
+      border-bottom: 1px solid var(--mint-line);
+      position: sticky;
+      top: 0;
+      z-index: 20;
+    }
+    .topbar-right {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    .main {
+      padding: 20px 16px 110px;
+    }
+    .bottom-nav {
+      display: flex;
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: #fff;
+      border-top: 1px solid var(--mint-line);
+      padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+      justify-content: space-around;
+      align-items: center;
+      z-index: 20;
+    }
+    .bottom-nav a {
+      font-size: 13.5px;
+      padding: 8px 12px;
+    }
+    .bottom-nav a.on {
+      color: var(--forest);
+      background: var(--mint);
+    }
+    .bottom-nav .plus {
+      width: 46px;
+      height: 46px;
+      border-radius: 50%;
+      background: var(--pulse);
+      color: var(--pulse-ink);
+      font-size: 24px;
+      padding: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+  }
+</style>

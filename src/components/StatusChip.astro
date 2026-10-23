@@ -1,0 +1,12 @@
+---
+import { dict } from '../lib/i18n';
+import type { DocStatus, SignerStatus } from '../lib/types';
+interface Props {
+  status: DocStatus | SignerStatus;
+  kind?: 'doc' | 'signer';
+}
+const { status, kind = 'doc' } = Astro.props;
+const t = dict(Astro.locals.lang) as Record<string, string>;
+const label = t[(kind === 'doc' ? 'st_' : 'ss_') + status] || status;
+---
+<span class={`chip chip-${status}`}>{label}</span>

@@ -1,0 +1,277 @@
+---
+import App from '../../layouts/App.astro';
+import StatusChip from '../../components/StatusChip.astro';
+import { dict, fill } from '../../lib/i18n';
+import { expireDue, getDoc, getEvents, getSigners } from '../../lib/docs';
+import { describeUserAgent, formatDate } from '../../lib/format';
+
+const lang = Astro.locals.lang;
+const t = dict(lang);
+await expireDue();
+const doc = await getDoc(Astro.params.id!);
+if (!doc) return Astro.redirect('/');
+if (doc.status === 'draft') return Astro.redirect(`/new?id=${doc.id}`);
+const [signers, events] = await Promise.all([getSigners(doc.id), getEvents(doc.id)]);
+const active = doc.status === 'sent' || doc.status === 'opened';
+const tt = t as Record<string, string>;
+const kind = (type: string) =>
+  ['signed', 'completed'].includes(type) ? 'good' : ['opened', 'otp_verified', 'consent', 'otp_sent'].includes(type) ? 'warm' : ['declined', 'cancelled', 'expired', 'otp_failed'].includes(type) ? 'bad' : 'base';
+const evs = events.map((e) => ({
+  label: fill(tt[`ev_${e.type}`] || e.type, { name: e.detail || '' }),
+  extra: e.type === 'declined' && e.detail ? `${t.declineReasonLabel}: “${e.detail}”` : '',
+  who: e.actor_name,
+  time: `${formatDate(e.at, lang, { time: true, seconds: true })} (GMT+7)`,
+  meta: e.ip ? `IP ${e.ip} · ${describeUserAgent(e.user_agent)}` : '',
+  kind: kind(e.type),
+}));
+const justSent = Astro.url.searchParams.has('sent');
+const finalPending = doc.status === 'completed' && !doc.final_key;
+---
+<App title={doc.title} clientStrings>
+  <a class="back-link" href="/">← {t.backDocs}</a>
+  <div class="meta">
+    <StatusChip status={doc.status} />
+    <span class="mono faint small">{doc.id}</span>
+  </div>
+  <h1 class="doc-title">{doc.title}</h1>
+  <div class="actions">
+    {doc.final_key && <a class="btn" href={`/api/docs/${doc.id}/signed?download`}>{t.download}</a>}
+    {doc.final_key && <a class="btn btn-ghost" href={`/api/docs/${doc.id}/signed#page=${doc.pages + 1}`} target="_blank" rel="noopener">{t.downloadCert}</a>}
+    {finalPending && <button class="btn" type="button" id="finalize">{t.download}</button>}
+    {active && <button class="btn" type="button" id="remind">{t.resend}</button>}
+    <a class="btn btn-ghost" href={`/api/docs/${doc.id}/file`} target="_blank" rel="noopener">{t.downloadOriginal}</a>
+    {active && <button class="btn btn-danger" type="button" id="cancel">{t.cancelReq}</button>}
+  </div>
+
+  <div class="grid">
+    <section class="card audit">
+      <div class="audit-head">
+        <h2>{t.audit}</h2>
+        <span class="small muted">{evs.length} {t.events}</span>
+      </div>
+      <ol class="timeline">
+        {
+          evs.map((e) => (
+            <li class={`ev ${e.kind}`}>
+              <span class="ev-dot" />
+              <div>
+                <strong>{e.label}</strong>
+                {e.extra && <div class="small" style="color:var(--danger)">{e.extra}</div>}
+                <div class="small muted">{e.who}</div>
+                <div class="mono small ev-meta">{e.time}</div>
+                {e.meta && <div class="mono small ev-meta">{e.meta}</div>}
+              </div>
+            </li>
+          ))
+        }
+      </ol>
+    </section>
+
+    <aside class="side-col">
+      <section class="card">
+        <h2>{t.signersProg}</h2>
+        <div class="signers">
+          {
+            signers.map((s) => (
+              <div class="signer">
+                <span class="num-dot" style={s.status === 'signed' ? 'background:var(--forest);color:#fff' : 'background:var(--mint)'}>
+                  {s.position + 1}
+                </span>
+                <div class="who">
+                  <strong>{s.name}</strong>
+                  <span class="small muted">{s.email}</span>
+                  {s.signed_at && <span class="small faint">{formatDate(s.signed_at, lang, { time: true })}</span>}
+                </div>
+                <StatusChip status={s.status} kind="signer" />
+              </div>
+            ))
+          }
+        </div>
+      </section>
+      <section class="card">
+        <h2>{t.evidence}</h2>
+        <span class="label" style="margin-top:16px">{t.hashBefore}</span>
+        <div class="hash">{doc.hash_before}</div>
+        <span class="label" style="margin-top:16px">{t.hashAfter}</span>
+        <div class="hash" style={doc.hash_final ? 'color:var(--forest)' : 'color:var(--faint);font-family:var(--font)'}>{doc.hash_final || t.pending}</div>
+        <span class="chip chip-sent" style="margin-top:16px">{t.storage}</span>
+      </section>
+    </aside>
+  </div>
+
+  <div class="overlay" id="cancel-dialog" hidden>
+    <div class="modal">
+      <h2>{t.cancelTitle}</h2>
+      <p class="muted">{t.cancelBody}</p>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px">
+        <button class="btn btn-soft" type="button" data-close>{t.keep}</button>
+        <button class="btn btn-danger-solid" type="button" id="confirm-cancel">{t.confirmCancel}</button>
+      </div>
+    </div>
+  </div>
+  <script type="application/json" id="detail-config" set:html={JSON.stringify({ id: doc.id, justSent })} />
+</App>
+
+<script>
+  import { api, strings, toast } from '../../scripts/ui';
+  const t = strings();
+  const { id, justSent } = JSON.parse(document.getElementById('detail-config')!.textContent!);
+  if (justSent) {
+    toast(t.sentToast);
+    history.replaceState(null, '', location.pathname);
+  }
+  document.getElementById('remind')?.addEventListener('click', async (e) => {
+    const b = e.currentTarget as HTMLButtonElement;
+    b.disabled = true;
+    try {
+      await api(`/api/docs/${id}/remind`, { method: 'POST' });
+      toast(t.resentToast);
+      setTimeout(() => location.reload(), 900);
+    } catch {
+      toast(t.errGeneric, true);
+      b.disabled = false;
+    }
+  });
+  const dialog = document.getElementById('cancel-dialog')!;
+  document.getElementById('cancel')?.addEventListener('click', () => (dialog.hidden = false));
+  dialog.addEventListener('click', (e) => {
+    if (e.target === dialog || (e.target as HTMLElement).closest('[data-close]')) dialog.hidden = true;
+  });
+  document.getElementById('confirm-cancel')!.addEventListener('click', async () => {
+    try {
+      await api(`/api/docs/${id}/cancel`, { method: 'POST' });
+      location.reload();
+    } catch {
+      toast(t.errGeneric, true);
+    }
+  });
+  document.getElementById('finalize')?.addEventListener('click', async (e) => {
+    (e.currentTarget as HTMLButtonElement).disabled = true;
+    await api(`/api/docs/${id}/finalize`, { method: 'POST' }).catch(() => toast(t.errGeneric, true));
+    location.reload();
+  });
+</script>
+
+<style>
+  .back-link {
+    display: inline-block;
+    font-weight: 600;
+    text-decoration: none;
+    margin-bottom: 18px;
+  }
+  .meta {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+  .doc-title {
+    margin: 10px 0 16px;
+    font-size: 28px;
+  }
+  .actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 22px;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 380px;
+    gap: 20px;
+    align-items: start;
+  }
+  .side-col {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+  .audit-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 14px;
+  }
+  .timeline {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .ev {
+    display: grid;
+    grid-template-columns: 22px 1fr;
+    gap: 10px;
+    position: relative;
+    padding-bottom: 18px;
+  }
+  .ev:not(:last-child)::before {
+    content: '';
+    position: absolute;
+    left: 10px;
+    top: 22px;
+    bottom: 2px;
+    width: 2px;
+    background: var(--mint-line);
+  }
+  .ev-dot {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: 5px solid #e6f2ea;
+    background: var(--sage);
+    margin-top: 1px;
+  }
+  .ev.good .ev-dot {
+    background: var(--forest);
+    border-color: var(--mint);
+  }
+  .ev.warm .ev-dot {
+    background: var(--pulse);
+    border-color: var(--peach);
+  }
+  .ev.bad .ev-dot {
+    background: var(--danger);
+    border-color: var(--danger-bg);
+  }
+  .ev-meta {
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .signers {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 14px;
+  }
+  .signer {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: var(--mint-3);
+    border-radius: 16px;
+    padding: 12px;
+  }
+  .who {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .who span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .modal p {
+    margin: 10px 0 0;
+  }
+  @media (max-width: 1000px) {
+    .grid {
+      grid-template-columns: 1fr;
+    }
+    .audit {
+      order: 2;
+    }
+    .doc-title {
+      font-size: 23px;
+    }
+  }
+</style>
