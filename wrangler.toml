@@ -26,8 +26,7 @@ PDF_MODE = "browser"
 [[d1_databases]]
 binding = "DB"
 database_name = "pulsesign"
-# Replace with the ID from `npx wrangler d1 create pulsesign` (see README).
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "d13e2fe4-1ead-4202-8027-9a3e043d8d55"
 migrations_dir = "migrations"
 
 [[r2_buckets]]
