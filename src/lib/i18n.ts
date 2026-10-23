@@ -212,6 +212,7 @@ const en = {
   verifyPrivacy: 'The hash is computed in your browser. The file is never uploaded or stored.',
   verifyEvidence: 'Signing evidence',
   verifyEvidenceSub: 'Shown only to someone holding this exact signed file.',
+  verifyIpStaff: 'IP addresses are kept as signing evidence and shown only to the law firm’s staff.',
 
   // Signer flow
   sentBy: 'Sent by',
@@ -307,7 +308,7 @@ const en = {
   certEvent: 'Event',
   certBy: 'By',
   certLegal:
-    'This document was signed with electronic signatures through Pulse Sign. Every signer verified their identity with a one-time code sent by email. The SHA-256 above identifies the original file. To check that a copy of this signed document is unaltered, and to see the full audit trail with IP addresses, upload it at {url}.',
+    'This document was signed with electronic signatures through Pulse Sign. Every signer verified their identity with a one-time code sent by email. The SHA-256 above identifies the original file. To check that a copy of this signed document is unaltered, and to see the audit trail, upload it at {url}.',
 
   // Emails
   emSignSubjectFallback: 'Please sign: {title}',
@@ -526,6 +527,7 @@ const th: Dict = {
   verifyPrivacy: 'ระบบคำนวณ hash ในเบราว์เซอร์ของคุณ ไฟล์จะไม่ถูกอัปโหลดหรือจัดเก็บ',
   verifyEvidence: 'หลักฐานการลงนาม',
   verifyEvidenceSub: 'แสดงเฉพาะผู้ที่ถือไฟล์ที่ลงนามแล้วฉบับนี้เท่านั้น',
+  verifyIpStaff: 'IP address ถูกเก็บไว้เป็นหลักฐานการลงนาม และแสดงเฉพาะเจ้าหน้าที่ของสำนักงานกฎหมายเท่านั้น',
 
   sentBy: 'ส่งโดย',
   reqSign: 'ขอให้คุณเซ็นเอกสาร',
@@ -619,7 +621,7 @@ const th: Dict = {
   certEvent: 'เหตุการณ์',
   certBy: 'โดย',
   certLegal:
-    'เอกสารนี้ลงนามด้วยลายมือชื่ออิเล็กทรอนิกส์ผ่าน Pulse Sign ผู้ลงนามทุกคนยืนยันตัวตนด้วยรหัส OTP ทางอีเมล ค่า SHA-256 ข้างต้นระบุไฟล์ต้นฉบับ หากต้องการตรวจสอบว่าสำเนาเอกสารที่ลงนามแล้วไม่ถูกแก้ไข และดูประวัติการดำเนินการทั้งหมดพร้อม IP อัปโหลดได้ที่ {url}',
+    'เอกสารนี้ลงนามด้วยลายมือชื่ออิเล็กทรอนิกส์ผ่าน Pulse Sign ผู้ลงนามทุกคนยืนยันตัวตนด้วยรหัส OTP ทางอีเมล ค่า SHA-256 ข้างต้นระบุไฟล์ต้นฉบับ หากต้องการตรวจสอบว่าสำเนาเอกสารที่ลงนามแล้วไม่ถูกแก้ไข และดูประวัติการดำเนินการ อัปโหลดได้ที่ {url}',
 
   emSignSubjectFallback: 'กรุณาลงนาม: {title}',
   emSignIntro: '{sender} จาก {org} ขอให้คุณเซ็นเอกสาร',
