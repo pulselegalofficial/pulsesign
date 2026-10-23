@@ -70,6 +70,12 @@ CI runs check, tests and build on every push and pull request.
 5. Signers can **decline** with a reason; the request stops and the sender is
    emailed.
 
+While signing, each signer sees what the others have already put on the
+document (signatures, initials, names, dates) as read-only overlays, and a row
+showing who has signed. With signing order off, the page checks every 20
+seconds and shows a signature as soon as another signer adds it. Other
+signers' emails are never sent to the signing page.
+
 With signing order on, the next signer is emailed when the previous one
 signs. Off, everyone is emailed at once.
 
@@ -83,9 +89,8 @@ signer's language instead. Date fields are written in the signer's language.
 
 When the last signer signs, the document is marked completed. Then every field
 is stamped onto the original PDF and a **certificate of completion** is
-appended (document facts, SHA-256 of the original, each signer's signature,
-time, OTP verification, IP and device, and the full audit trail). The
-certificate is always in English; names and the title stay as entered. The result
+appended (document facts, SHA-256 of the original, and each signer's
+signature, time, OTP verification and device). The certificate is always in English; names and the title stay as entered. The result
 is stored in R2 and every signer and the sender get an email with it attached
 (Resend fetches the attachment from a 30-day download link).
 
@@ -93,7 +98,10 @@ Where the stamping happens depends on `PDF_MODE`; see below.
 
 The SHA-256 of that final file is recorded and can be checked at `/verify`,
 which is public. The hash is computed in the browser; the file is never
-uploaded.
+uploaded. On a match, `/verify` also shows the evidence that is not printed on
+the certificate: each signer's IP address and device, and the full audit trail
+with IPs. Only someone holding the exact signed file can produce its hash, so
+this is the same audience the certificate reaches.
 
 Every state change writes an event in the same place it happens
 (`src/lib/docs.ts`), so the audit trail cannot drift from what happened.

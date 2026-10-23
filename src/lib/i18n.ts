@@ -210,6 +210,8 @@ const en = {
   completedAt: 'Completed',
   verifyAnother: 'Verify another file',
   verifyPrivacy: 'The hash is computed in your browser. The file is never uploaded or stored.',
+  verifyEvidence: 'Signing evidence',
+  verifyEvidenceSub: 'Shown only to someone holding this exact signed file.',
 
   // Signer flow
   sentBy: 'Sent by',
@@ -280,6 +282,11 @@ const en = {
   otpVerified: 'Email OTP ✓',
   nextSigner: 'Next: {name} has been sent the signing request.',
   waitingOthers: 'Waiting for the other signers.',
+  coSigned: 'Signed',
+  coPending: 'Not signed yet',
+  coYou: 'You',
+  coSignedBy: 'Signed by {name}',
+  coJustSigned: '{name} has just signed',
   downloadCopy: 'Download copy',
   verifyLink: 'Verify document',
   poweredBy: 'Secured by Pulse Sign · HTTPS · SHA-256',
@@ -300,7 +307,7 @@ const en = {
   certEvent: 'Event',
   certBy: 'By',
   certLegal:
-    'This document was signed with electronic signatures under Section 9 of the Electronic Transactions Act B.E. 2544 (2001). Every signer verified their identity with a one-time code sent by email. The SHA-256 above identifies the original file. To check that a copy of this signed document is unaltered, upload it at {url}. Personal data is handled under the Personal Data Protection Act B.E. 2562 (2019).',
+    'This document was signed with electronic signatures under Section 9 of the Electronic Transactions Act B.E. 2544 (2001). Every signer verified their identity with a one-time code sent by email. The SHA-256 above identifies the original file. To check that a copy of this signed document is unaltered, and to see the full audit trail with IP addresses, upload it at {url}. Personal data is handled under the Personal Data Protection Act B.E. 2562 (2019).',
 
   // Emails
   emSignSubjectFallback: 'Please sign: {title}',
@@ -517,6 +524,8 @@ const th: Dict = {
   completedAt: 'เซ็นครบเมื่อ',
   verifyAnother: 'ตรวจสอบไฟล์อื่น',
   verifyPrivacy: 'ระบบคำนวณ hash ในเบราว์เซอร์ของคุณ ไฟล์จะไม่ถูกอัปโหลดหรือจัดเก็บ',
+  verifyEvidence: 'หลักฐานการลงนาม',
+  verifyEvidenceSub: 'แสดงเฉพาะผู้ที่ถือไฟล์ที่ลงนามแล้วฉบับนี้เท่านั้น',
 
   sentBy: 'ส่งโดย',
   reqSign: 'ขอให้คุณเซ็นเอกสาร',
@@ -586,6 +595,11 @@ const th: Dict = {
   otpVerified: 'OTP ทางอีเมล ✓',
   nextSigner: 'ลำดับถัดไป: {name} ระบบส่งคำขอเซ็นให้แล้ว',
   waitingOthers: 'รอผู้เซ็นคนอื่น',
+  coSigned: 'เซ็นแล้ว',
+  coPending: 'ยังไม่ได้เซ็น',
+  coYou: 'คุณ',
+  coSignedBy: 'เซ็นโดย {name}',
+  coJustSigned: '{name} เพิ่งเซ็นเอกสารนี้',
   downloadCopy: 'ดาวน์โหลดสำเนา',
   verifyLink: 'ตรวจสอบเอกสาร',
   poweredBy: 'ปลอดภัยด้วย Pulse Sign · HTTPS · SHA-256',
@@ -605,7 +619,7 @@ const th: Dict = {
   certEvent: 'เหตุการณ์',
   certBy: 'โดย',
   certLegal:
-    'เอกสารนี้ลงนามด้วยลายมือชื่ออิเล็กทรอนิกส์ตามมาตรา 9 แห่ง พ.ร.บ.ว่าด้วยธุรกรรมทางอิเล็กทรอนิกส์ พ.ศ. 2544 ผู้ลงนามทุกคนยืนยันตัวตนด้วยรหัส OTP ทางอีเมล ค่า SHA-256 ข้างต้นระบุไฟล์ต้นฉบับ หากต้องการตรวจสอบว่าสำเนาเอกสารที่ลงนามแล้วไม่ถูกแก้ไข อัปโหลดได้ที่ {url} ข้อมูลส่วนบุคคลจัดเก็บตาม พ.ร.บ.คุ้มครองข้อมูลส่วนบุคคล พ.ศ. 2562',
+    'เอกสารนี้ลงนามด้วยลายมือชื่ออิเล็กทรอนิกส์ตามมาตรา 9 แห่ง พ.ร.บ.ว่าด้วยธุรกรรมทางอิเล็กทรอนิกส์ พ.ศ. 2544 ผู้ลงนามทุกคนยืนยันตัวตนด้วยรหัส OTP ทางอีเมล ค่า SHA-256 ข้างต้นระบุไฟล์ต้นฉบับ หากต้องการตรวจสอบว่าสำเนาเอกสารที่ลงนามแล้วไม่ถูกแก้ไข และดูประวัติการดำเนินการทั้งหมดพร้อม IP อัปโหลดได้ที่ {url} ข้อมูลส่วนบุคคลจัดเก็บตาม พ.ร.บ.คุ้มครองข้อมูลส่วนบุคคล พ.ศ. 2562',
 
   emSignSubjectFallback: 'กรุณาลงนาม: {title}',
   emSignIntro: '{sender} จาก {org} ขอให้คุณเซ็นเอกสาร',
