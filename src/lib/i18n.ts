@@ -86,6 +86,13 @@ const en = {
   replace: 'Replace',
   deleteDraft: 'Delete draft',
   deleteDraftConfirm: 'Delete this draft? This cannot be undone.',
+  deleteDoc: 'Delete document',
+  deleteTitle: 'Delete this document permanently?',
+  deleteBody: 'The original PDF, the signed PDF, every signature and the whole audit trail are deleted from Pulse Sign and its storage. Signing and download links stop working. This cannot be undone.',
+  deleteNote: 'Copies already emailed stay in recipients’ inboxes and the email provider’s logs.',
+  deleteTypeId: 'Type {id} to confirm',
+  deleteConfirm: 'Delete permanently',
+  deletedToast: 'Document {id} deleted',
   docTitle: 'Document title',
   pagesUnit: 'pages',
   errNotPdf: 'Please choose a PDF file.',
@@ -100,6 +107,7 @@ const en = {
   seqOff: 'Everyone signs at the same time',
   fullName: 'Full name',
   email: 'Email',
+  emailLang: 'Email language',
   addSigner: 'Add signer',
   addMe: 'Add me',
   moveUp: 'Move up',
@@ -396,6 +404,13 @@ const th: Dict = {
   replace: 'เปลี่ยนไฟล์',
   deleteDraft: 'ลบร่าง',
   deleteDraftConfirm: 'ลบร่างนี้? ไม่สามารถกู้คืนได้',
+  deleteDoc: 'ลบเอกสาร',
+  deleteTitle: 'ลบเอกสารนี้ถาวร?',
+  deleteBody: 'PDF ต้นฉบับ PDF ที่เซ็นแล้ว ลายเซ็นทุกคน และ audit trail ทั้งหมดจะถูกลบออกจาก Pulse Sign และที่เก็บไฟล์ ลิงก์เซ็นและลิงก์ดาวน์โหลดจะใช้ไม่ได้ทันที กู้คืนไม่ได้',
+  deleteNote: 'สำเนาที่ส่งทางอีเมลไปแล้วจะยังอยู่ในกล่องอีเมลของผู้รับและในบันทึกของผู้ให้บริการส่งอีเมล',
+  deleteTypeId: 'พิมพ์ {id} เพื่อยืนยัน',
+  deleteConfirm: 'ลบถาวร',
+  deletedToast: 'ลบเอกสาร {id} แล้ว',
   docTitle: 'ชื่อเอกสาร',
   pagesUnit: 'หน้า',
   errNotPdf: 'กรุณาเลือกไฟล์ PDF',
@@ -410,6 +425,7 @@ const th: Dict = {
   seqOff: 'เซ็นพร้อมกัน',
   fullName: 'ชื่อ-นามสกุล',
   email: 'อีเมล',
+  emailLang: 'ภาษาอีเมล',
   addSigner: 'เพิ่มผู้เซ็น',
   addMe: 'เพิ่มตัวฉัน',
   moveUp: 'เลื่อนขึ้น',
@@ -629,6 +645,11 @@ const th: Dict = {
 const DICTS: Record<Lang, Dict> = { en, th };
 
 export const dict = (lang: Lang): Dict => DICTS[lang];
+
+/** The "System" actor is stored in the document's language; show it in the reader's. */
+export function actorLabel(name: string, lang: Lang): string {
+  return name === DICTS.th.system || name === DICTS.en.system ? DICTS[lang].system : name;
+}
 
 export function fill(template: string, vars: Record<string, string | number>): string {
   return template.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k]) : m));

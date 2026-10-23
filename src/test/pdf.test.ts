@@ -25,7 +25,7 @@ const doc: DocumentRow = {
   created_at: now, updated_at: now, sent_at: now, expires_at: now, completed_at: now + 60_000,
 };
 const signer = (position: number, name: string, email: string): SignerRow => ({
-  id: `sgn_${position}abcdefgh`, doc_id: doc.id, position, name, email, status: 'signed', token_hash: null, otp_hash: null,
+  id: `sgn_${position}abcdefgh`, doc_id: doc.id, position, name, email, lang: 'th', status: 'signed', token_hash: null, otp_hash: null,
   otp_expires_at: null, otp_attempts: 0, otp_sent_count: 1, otp_last_sent_at: now, session_hash: null, session_expires: null,
   otp_verified_at: now, consent_at: now, signed_at: now + 30_000, declined_at: null, decline_reason: null, ip: '49.228.47.112',
   user_agent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) Safari/604.1',

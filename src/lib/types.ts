@@ -60,6 +60,7 @@ export interface SignerRow {
   decline_reason: string | null;
   ip: string | null;
   user_agent: string | null;
+  lang: string;
 }
 
 export interface FieldRow {
@@ -102,4 +103,6 @@ export interface FieldInput {
 export interface SignerInput {
   name: string;
   email: string;
+  /** Language of this signer's emails and signing page. */
+  lang?: string;
 }

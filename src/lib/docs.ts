@@ -254,8 +254,15 @@ export async function saveDraft(doc: DocumentRow, input: DraftInput): Promise<vo
     signers.forEach((s, position) => {
       stmts.push(
         db()
-          .prepare('INSERT INTO signers (id, doc_id, position, name, email) VALUES (?, ?, ?, ?, ?)')
-          .bind(randomId('sgn'), doc.id, position, String(s.name || '').trim().slice(0, 200), String(s.email || '').trim().toLowerCase().slice(0, 254))
+          .prepare('INSERT INTO signers (id, doc_id, position, name, email, lang) VALUES (?, ?, ?, ?, ?, ?)')
+          .bind(
+            randomId('sgn'),
+            doc.id,
+            position,
+            String(s.name || '').trim().slice(0, 200),
+            String(s.email || '').trim().toLowerCase().slice(0, 254),
+            isLang(s.lang) ? s.lang : docLang(doc)
+          )
       );
     });
   }
@@ -294,15 +301,41 @@ export async function replaceDraftFile(doc: DocumentRow, bytes: Uint8Array, meta
   ]);
 }
 
-export async function deleteDraft(doc: DocumentRow): Promise<void> {
-  if (doc.status !== 'draft') throw new DocError('not_draft', 409);
+/**
+ * Permanently deletes a document in any status: every file in R2 (original,
+ * signature images, signed PDF) and every row in D1 (signers, fields, audit
+ * trail). Nothing is kept. Anything other than a draft must be confirmed by
+ * passing its document number.
+ *
+ * Order matters so a failure can simply be retried: signing links are revoked
+ * first, then files are removed, and the database rows go last, so a
+ * half-finished delete still shows up in the dashboard to try again.
+ */
+export async function deleteDocument(doc: DocumentRow, confirmId: string | null): Promise<void> {
+  if (doc.status !== 'draft' && confirmId !== doc.id) throw new DocError('confirm_required', 400);
+  await db()
+    .prepare('UPDATE signers SET token_hash = NULL, session_hash = NULL WHERE doc_id = ?')
+    .bind(doc.id)
+    .run();
+  await db().prepare('UPDATE documents SET final_token_hash = NULL WHERE id = ?').bind(doc.id).run();
+
+  const prefix = `docs/${doc.id}/`;
+  const keys = new Set([doc.file_key, ...(doc.final_key ? [doc.final_key] : [])]);
+  let cursor: string | undefined;
+  do {
+    const page = await files().list({ prefix, cursor, limit: 1000 });
+    for (const o of page.objects) keys.add(o.key);
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
+  const all = [...keys];
+  for (let i = 0; i < all.length; i += 1000) await files().delete(all.slice(i, i + 1000));
+
   await db().batch([
     db().prepare('DELETE FROM events WHERE doc_id = ?').bind(doc.id),
     db().prepare('DELETE FROM fields WHERE doc_id = ?').bind(doc.id),
     db().prepare('DELETE FROM signers WHERE doc_id = ?').bind(doc.id),
     db().prepare('DELETE FROM documents WHERE id = ?').bind(doc.id),
   ]);
-  await files().delete(doc.file_key);
 }
 
 /** Why a draft cannot be sent yet, or null when it can. */
@@ -528,7 +561,7 @@ export async function submitSignature(
     } else if (f.type === 'name') {
       value = signer.name;
     } else {
-      value = formatDate(now, lang);
+      value = formatDate(now, isLang(signer.lang) ? signer.lang : lang);
     }
     stmts.push(
       db().prepare(`UPDATE fields SET value = ?, filled_at = ? WHERE id = ? AND ${stillOpen}`).bind(value, now, f.id, signer.id, doc.id)
@@ -706,7 +739,7 @@ export async function acceptFinal(doc: DocumentRow, bytes: Uint8Array, sha256: s
   const [signers, owner] = await Promise.all([getSigners(doc.id), getUser(doc.owner_email)]);
   await mail.completed({
     doc: updated,
-    recipients: [...signers.map((s) => ({ name: s.name, email: s.email })), { name: displayName(owner), email: owner.email }],
+    recipients: [...signers.map((s) => ({ name: s.name, email: s.email, lang: s.lang })), { name: displayName(owner), email: owner.email }],
     downloadUrl: `${appUrl(request)}/dl/${doc.id}?t=${token}`,
     request,
   });

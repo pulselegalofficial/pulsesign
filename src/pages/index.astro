@@ -99,6 +99,11 @@ const rows = docs.map((d) => {
 <script>
   import { strings, toast } from '../scripts/ui';
   const t = strings();
+  const deleted = new URLSearchParams(location.search).get('deleted');
+  if (deleted) {
+    toast(t.deletedToast.replace('{id}', deleted));
+    history.replaceState(null, '', '/');
+  }
   const pending: string[] = JSON.parse(document.getElementById('pending-final')!.textContent || '[]');
   if (pending.length) {
     void (async () => {

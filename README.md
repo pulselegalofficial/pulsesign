@@ -46,7 +46,13 @@ CI runs check, tests and build on every push and pull request.
 3. **Dashboard** (`/`) lists every document in the firm with status filters
    and search. Everyone in `STAFF_EMAILS` sees all documents.
 4. **Detail** (`/docs/:id`) shows the audit trail, signer progress and hashes,
-   with remind, cancel and download.
+   with remind, cancel, download and delete.
+5. **Delete** removes a document in any status, permanently: every R2 object
+   under `docs/<id>/` (original, signature images, signed PDF) and every D1
+   row (signers, fields, audit trail). Anything but a draft must be confirmed
+   by typing the document number. Signing and download links are revoked
+   first, so a delete that fails half-way can simply be retried. Copies
+   already emailed stay with the recipients and in Resend's logs.
 
 ### Signers
 
@@ -63,12 +69,19 @@ CI runs check, tests and build on every push and pull request.
 With signing order on, the next signer is emailed when the previous one
 signs. Off, everyone is emailed at once.
 
+Each signer has a language (TH/EN, chosen per signer in the wizard). Their
+emails (request, code, completion) use it, and their signing page opens in it
+unless they switch with the toggle. A subject or message the sender typed is
+sent as written; the wizard's default subject and message are sent in each
+signer's language instead. Date fields are written in the signer's language.
+
 ### Completion and evidence
 
 When the last signer signs, the document is marked completed. Then every field
 is stamped onto the original PDF and a **certificate of completion** is
 appended (document facts, SHA-256 of the original, each signer's signature,
-time, OTP verification, IP and device, and the full audit trail). The result
+time, OTP verification, IP and device, and the full audit trail). The
+certificate is always in English; names and the title stay as entered. The result
 is stored in R2 and every signer and the sender get an email with it attached
 (Resend fetches the attachment from a 30-day download link).
 
@@ -185,8 +198,8 @@ a test checks both languages use the same `{placeholders}`.
 - **Email OTP is the only identity check.** No SMS, ThaiD or ID document check.
 - **No Google sign-in** for staff yet (the design shows one); sign-in is by
   email link only.
-- **No retention policy.** Originals, signature images and signed PDFs are
-  kept in R2 indefinitely; there is no delete for sent documents.
+- **No automatic retention policy.** Documents stay until someone deletes
+  them; nothing expires on its own.
 - **Free plan headroom.** In browser mode every request should stay under
   10 ms of CPU, but very large dashboards were not measured on Cloudflare
   itself. Check **Workers → pulsesign → Metrics → CPU time** after launch.
