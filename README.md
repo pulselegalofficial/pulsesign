@@ -83,7 +83,7 @@ Each signer has a language (TH/EN, chosen per signer in the wizard). Their
 emails (request, code, completion) use it, and their signing page opens in it
 unless they switch with the toggle. A subject or message the sender typed is
 sent as written; the wizard's default subject and message are sent in each
-signer's language instead. Date fields are written in the signer's language.
+signer's language instead. Date fields are written as DD/MM/YYYY (Gregorian year, Bangkok time) for every signer.
 
 ### Completion and evidence
 

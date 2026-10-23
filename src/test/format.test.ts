@@ -36,3 +36,11 @@ describe('initials', () => {
     expect(initials('', 'nattapol@pulselegal.co')).toBe('NA');
   });
 });
+
+describe('formatFieldDate', () => {
+  it('is DD/MM/YYYY in Bangkok time with a Gregorian year', async () => {
+    const { formatFieldDate } = await import('../lib/format');
+    // 2026-03-04 20:00 UTC is 5 March 03:00 in Bangkok.
+    expect(formatFieldDate(Date.UTC(2026, 2, 4, 20, 0))).toBe('05/03/2026');
+  });
+});

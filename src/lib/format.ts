@@ -29,6 +29,15 @@ export function formatDate(ts: number, lang: Lang, opts: { time?: boolean; secon
   return `${date} · ${pad(p.hours)}:${pad(p.minutes)}${opts.seconds ? ':' + pad(p.seconds) : ''}`;
 }
 
+/**
+ * Date written into a signer's date field: DD/MM/YYYY, Gregorian year,
+ * Bangkok time. The same for every signer, whatever their language.
+ */
+export function formatFieldDate(ts: number): string {
+  const p = bangkokParts(ts);
+  return `${pad(p.day)}/${pad(p.month + 1)}/${p.year}`;
+}
+
 /** Buddhist-era year in Thailand, used in document numbers. */
 export const buddhistYear = (ts: number) => bangkokParts(ts).year + 543;
 
