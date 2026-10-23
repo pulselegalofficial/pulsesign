@@ -7,7 +7,7 @@ import { ACTIVE, getSigners, getUser } from '../../lib/docs';
 import { resolveSigner } from '../../lib/signer-session';
 import { displayName } from '../../lib/auth';
 import { orgName } from '../../lib/env';
-import { describeUserAgent, formatDate, initials } from '../../lib/format';
+import { describeUserAgent, formatDate, formatFieldDate, initials } from '../../lib/format';
 
 const token = Astro.params.token!;
 const ctx = await resolveSigner(Astro.request, token);
@@ -54,7 +54,7 @@ const clientConfig = ctx
       step: initialStep,
       signerName: signer!.name,
       initials: initials(signer!.name, signer!.email),
-      today: formatDate(Date.now(), lang),
+      today: formatFieldDate(Date.now()),
       email: signer!.email,
     }
   : null;

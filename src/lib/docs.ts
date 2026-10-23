@@ -1,6 +1,6 @@
 import { db, files, orgName, appUrl, pdfMode } from './env';
 import { randomId, randomOtp, randomToken, safeEqual, sha256Hex } from './crypto';
-import { buddhistYear, formatDate } from './format';
+import { buddhistYear, formatDate, formatFieldDate } from './format';
 import { clampField } from './geometry';
 import { isEmail } from './http';
 import { dict, isLang, type Lang } from './i18n';
@@ -561,7 +561,7 @@ export async function submitSignature(
     } else if (f.type === 'name') {
       value = signer.name;
     } else {
-      value = formatDate(now, isLang(signer.lang) ? signer.lang : lang);
+      value = formatFieldDate(now);
     }
     stmts.push(
       db().prepare(`UPDATE fields SET value = ?, filled_at = ? WHERE id = ? AND ${stillOpen}`).bind(value, now, f.id, signer.id, doc.id)
