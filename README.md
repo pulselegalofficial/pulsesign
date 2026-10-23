@@ -13,14 +13,17 @@ documents and the audit trail, **R2** for the PDFs and signature images,
 
 ```bash
 npm install
-npm run db:migrate:local   # creates the local D1 database
-npm run dev                # http://localhost:4321
+cp .dev.vars.example .dev.vars   # first time only
+npm run db:migrate:local         # creates the local D1 database
+node scripts/fake-google.mjs &   # stand-in for Google sign-in, port 4400
+npm run dev                      # http://localhost:4321
 ```
 
-Without `RESEND_API_KEY`, emails are not sent: they are printed in the dev
-server's log (`npx astro dev logs`), including sign-in links and one-time
-codes, so the whole flow works offline. Sign in with any address allowed by
-`STAFF_EMAILS` in `wrangler.toml` (default: anything `@pulselegal.co`).
+Locally, "Continue with Google" goes to `scripts/fake-google.mjs`, which asks
+which email to sign in as; `STAFF_EMAILS` in `wrangler.toml` still decides
+who gets in. Without `RESEND_API_KEY`, emails are not sent: they are printed
+in the dev server's log (`npx astro dev logs`), including one-time codes, so
+the whole flow works offline.
 
 | Command | What it does |
 |---|---|
@@ -37,10 +40,11 @@ CI runs check, tests and build on every push and pull request.
 
 ### Staff
 
-1. **Sign in** with a one-time link sent by email (`/login`). The emailed link
-   opens a confirmation page that signs in with a POST, so mail scanners that
-   open links cannot use up the link. Sessions last 14 days. Removing someone
-   from `STAFF_EMAILS` revokes their sessions at once.
+1. **Sign in with Google** (`/login`), OpenID Connect code flow with PKCE and
+   a state cookie (`src/lib/google.ts`). The email must be verified by Google
+   and allowed by `STAFF_EMAILS`; any other account is turned away. Sessions
+   last 14 days. Removing someone from `STAFF_EMAILS` revokes their sessions
+   at once. There is no other way to sign in.
 2. **New document** (`/new`) is a four-step wizard: upload → signers → place
    fields → review & send. Drafts save automatically.
 3. **Dashboard** (`/`) lists every document in the firm with status filters
@@ -97,8 +101,9 @@ Events are never edited or deleted.
 
 ### Security notes
 
-- Only SHA-256 hashes of sign-in tokens, sessions, signing links and OTPs are
-  stored. A database copy cannot be used to sign in or sign.
+- Only SHA-256 hashes of sessions, signing links and OTPs are stored. A
+  database copy cannot be used to sign in or sign. (The `login_tokens` table
+  is left over from email-link sign-in and is no longer used.)
 - A reminder issues a new signing link; the old one stops working. Cancel,
   decline and expiry revoke all links.
 - State-changing requests from another origin are rejected (CSRF), cookies are
@@ -175,10 +180,17 @@ The Worker never loads pdf-lib in browser mode.
    | Build command | `npm run build` |
    | Deploy command | `npx wrangler deploy` |
 
-4. On the Worker → **Settings → Variables and Secrets**, add
-   `RESEND_API_KEY` as a **Secret**. Check `APP_URL`, `STAFF_EMAILS` and
-   `EMAIL_FROM` in `wrangler.toml`.
-5. Add the custom domain (`sign.pulselegal.co`) under **Settings → Domains &
+4. **Google sign-in**: in Google Cloud Console create a project, set up the
+   OAuth consent screen (External; while in *Testing*, add every staff Google
+   account as a test user), then create an OAuth client of type *Web
+   application* with the redirect URI
+   `https://sign.pulselegal.co/api/auth/google/callback`.
+5. On the Worker → **Settings → Variables and Secrets**, add as **Secrets**:
+   `RESEND_API_KEY` and `GOOGLE_CLIENT_SECRET`. Put the OAuth client ID in
+   `GOOGLE_CLIENT_ID` in `wrangler.toml` (it is not secret). Check `APP_URL`,
+   `STAFF_EMAILS` and `EMAIL_FROM` there too. Plain variables added in the
+   dashboard are replaced by `wrangler.toml` on every deploy; secrets are not.
+6. Add the custom domain (`sign.pulselegal.co`) under **Settings → Domains &
    Routes**.
 
 Migrations do not run on a Git-triggered deploy. After a change in
@@ -196,8 +208,9 @@ a test checks both languages use the same `{placeholders}`.
   SHA-256 and `/verify`, not on a certificate embedded in the PDF that Adobe
   Reader would validate on its own.
 - **Email OTP is the only identity check.** No SMS, ThaiD or ID document check.
-- **No Google sign-in** for staff yet (the design shows one); sign-in is by
-  email link only.
+- **Google is the only way in.** If the firm's Google account is locked or
+  lost, nobody can sign in until it is recovered (documents are not
+  affected). A second allowed account in `STAFF_EMAILS` is a cheap fallback.
 - **No automatic retention policy.** Documents stay until someone deletes
   them; nothing expires on its own.
 - **Free plan headroom.** In browser mode every request should stay under

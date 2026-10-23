@@ -1,0 +1,6 @@
+# Copy to .dev.vars for local development (it is git-ignored).
+# Sign-in goes through the fake Google in scripts/fake-google.mjs.
+GOOGLE_CLIENT_ID=local-dev
+GOOGLE_CLIENT_SECRET=local-dev
+GOOGLE_AUTH_URL=http://localhost:4400/auth
+GOOGLE_TOKEN_URL=http://localhost:4400/token

@@ -6,6 +6,14 @@ import { dict } from '../lib/i18n';
 if (Astro.locals.user) return Astro.redirect('/');
 const t = dict(Astro.locals.lang);
 const next = Astro.url.searchParams.get('next') || '';
+const errors: Record<string, string> = {
+  not_allowed: t.loginNotAllowed,
+  google: t.loginFailed,
+  state: t.loginFailed,
+  not_configured: t.loginNotConfigured,
+};
+const error = errors[Astro.url.searchParams.get('error') || ''];
+const href = `/api/auth/google${next ? `?next=${encodeURIComponent(next)}` : ''}`;
 ---
 <Base title={t.loginTitle}>
   <div class="login">
@@ -22,68 +30,24 @@ const next = Astro.url.searchParams.get('next') || '';
           <span class="mobile-logo"><Logo size={30} /></span>
           <LangToggle />
         </div>
-        <form id="login-form" novalidate>
-          <h2 class="title">{t.loginTitle}</h2>
-          <p class="muted">{t.loginSub}</p>
-          <div class="field" style="margin-top:26px">
-            <label for="email">{t.emailLabel}</label>
-            <input class="input input-pill" id="email" name="email" type="email" autocomplete="email" required placeholder="you@pulselegal.co" />
-          </div>
-          <input type="hidden" name="next" value={next} />
-          <button class="btn btn-block btn-lg" style="margin-top:14px" type="submit" id="login-btn">{t.magicBtn}</button>
-          <p class="error small" id="login-error" hidden></p>
-          <p class="small faint" style="margin-top:26px">{t.terms}</p>
-        </form>
-        <div id="sent" hidden>
-          <div class="sent-icon">@</div>
-          <h2 class="title">{t.magicSentTitle}</h2>
-          <p class="muted">{t.magicSentBody} <strong id="sent-email" style="color:var(--ink)"></strong></p>
-          <p class="small faint">{t.magicSentNote}</p>
-          <button class="btn btn-soft" type="button" id="use-other" style="margin-top:12px">{t.useOther}</button>
-        </div>
+        <h2 class="title">{t.loginTitle}</h2>
+        <p class="muted">{t.loginSub}</p>
+        {error && <p class="error" role="alert">{error}</p>}
+        <a class="btn btn-block btn-lg google" href={href} id="google-btn">
+          <svg width="20" height="20" viewBox="0 0 48 48" aria-hidden="true">
+            <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/>
+            <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/>
+            <path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/>
+            <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/>
+          </svg>
+          {t.google}
+        </a>
+        <p class="small muted" style="margin-top:14px">{t.loginNote}</p>
+        <p class="small faint" style="margin-top:22px">{t.terms}</p>
       </div>
     </section>
   </div>
-  <script type="application/json" id="login-strings" set:html={JSON.stringify({ err: t.errGeneric })} />
 </Base>
-
-<script>
-  const form = document.getElementById('login-form') as HTMLFormElement;
-  const sent = document.getElementById('sent')!;
-  const err = document.getElementById('login-error')!;
-  const strings = JSON.parse(document.getElementById('login-strings')!.textContent!);
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const email = (form.elements.namedItem('email') as HTMLInputElement).value.trim();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      (form.elements.namedItem('email') as HTMLInputElement).classList.add('invalid');
-      return;
-    }
-    const btn = document.getElementById('login-btn') as HTMLButtonElement;
-    btn.disabled = true;
-    err.hidden = true;
-    try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ email, next: (form.elements.namedItem('next') as HTMLInputElement).value }),
-      });
-      if (!res.ok) throw new Error();
-      document.getElementById('sent-email')!.textContent = email;
-      form.hidden = true;
-      sent.hidden = false;
-    } catch {
-      err.textContent = strings.err;
-      err.hidden = false;
-    } finally {
-      btn.disabled = false;
-    }
-  });
-  document.getElementById('use-other')!.addEventListener('click', () => {
-    sent.hidden = true;
-    form.hidden = false;
-  });
-</script>
 
 <style>
   .login {
@@ -142,20 +106,22 @@ const next = Astro.url.searchParams.get('next') || '';
   }
   .error {
     color: var(--danger);
-    margin-top: 10px;
+    background: var(--danger-bg);
+    border-radius: 14px;
+    padding: 12px 14px;
+    margin: 18px 0 0;
   }
-  .sent-icon {
-    width: 64px;
-    height: 64px;
-    border-radius: 50%;
-    background: var(--mint);
-    color: var(--forest);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: 700;
-    font-size: 26px;
-    margin-bottom: 20px;
+  .google {
+    margin-top: 26px;
+    background: #fff;
+    color: var(--ink);
+    border: 1.5px solid var(--mint-line);
+    gap: 12px;
+  }
+  .google:hover {
+    color: var(--ink);
+    border-color: var(--forest);
+    filter: none;
   }
   @media (max-width: 860px) {
     .login {

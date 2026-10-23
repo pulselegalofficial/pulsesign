@@ -3,18 +3,16 @@ import { randomToken, sha256Hex } from './crypto';
 import type { User } from './types';
 
 /**
- * Staff authentication: passwordless sign-in links.
+ * Staff authentication. Staff sign in with Google (see google.ts); this file
+ * holds the allow-list and the sessions that follow a successful sign-in.
  *
- * Only SHA-256 hashes of link tokens and session tokens are stored, so a copy
- * of the database cannot be used to sign in. Who may sign in is decided by
- * STAFF_EMAILS; rows in `users` only hold display names.
+ * Only SHA-256 hashes of session tokens are stored, so a copy of the database
+ * cannot be used to sign in. Who may sign in is decided by STAFF_EMAILS;
+ * rows in `users` only hold display names.
  */
 
 export const SESSION_COOKIE = 'ps_session';
 const SESSION_TTL_MS = 14 * 24 * 60 * 60 * 1000;
-export const LOGIN_TOKEN_TTL_MS = 15 * 60 * 1000;
-/** Minimum gap between two sign-in emails to the same address. */
-const LOGIN_EMAIL_GAP_MS = 30 * 1000;
 
 export function isStaffEmail(email: string, allowList = env().STAFF_EMAILS || ''): boolean {
   const e = email.trim().toLowerCase();
@@ -25,36 +23,17 @@ export function isStaffEmail(email: string, allowList = env().STAFF_EMAILS || ''
     .some((rule) => (rule.startsWith('@') ? e.endsWith(rule) : e === rule));
 }
 
-/** Creates a sign-in token, or null when one was issued moments ago. */
-export async function createLoginToken(email: string, now = Date.now()): Promise<string | null> {
-  const recent = await db()
-    .prepare('SELECT 1 FROM login_tokens WHERE email = ? AND expires_at > ? LIMIT 1')
-    .bind(email, now + LOGIN_TOKEN_TTL_MS - LOGIN_EMAIL_GAP_MS)
-    .first();
-  if (recent) return null;
-  const token = randomToken();
-  await db()
-    .prepare('INSERT INTO login_tokens (token_hash, email, expires_at) VALUES (?, ?, ?)')
-    .bind(await sha256Hex(token), email, now + LOGIN_TOKEN_TTL_MS)
-    .run();
-  return token;
-}
-
-/** Consumes a sign-in token and returns a new session token. */
-export async function redeemLoginToken(token: string, now = Date.now()): Promise<string | null> {
-  const hash = await sha256Hex(token);
-  // Single statement, so two concurrent clicks cannot both succeed.
-  const row = await db()
-    .prepare('UPDATE login_tokens SET used_at = ? WHERE token_hash = ? AND used_at IS NULL AND expires_at > ? RETURNING email')
-    .bind(now, hash, now)
-    .first<{ email: string }>();
-  if (!row || !isStaffEmail(row.email)) return null;
-
+/**
+ * Starts a session for a staff member Google has vouched for. The display
+ * name is taken from Google the first time only; after that it is theirs to
+ * edit in the app.
+ */
+export async function createSession(email: string, name: string, now = Date.now()): Promise<string | null> {
+  if (!isStaffEmail(email)) return null;
   const session = randomToken();
   await db().batch([
-    db().prepare('INSERT INTO sessions (token_hash, email, expires_at) VALUES (?, ?, ?)').bind(await sha256Hex(session), row.email, now + SESSION_TTL_MS),
-    db().prepare('INSERT OR IGNORE INTO users (email, name, created_at) VALUES (?, ?, ?)').bind(row.email, '', now),
-    db().prepare('DELETE FROM login_tokens WHERE expires_at < ?').bind(now - 24 * 60 * 60 * 1000),
+    db().prepare('INSERT INTO sessions (token_hash, email, expires_at) VALUES (?, ?, ?)').bind(await sha256Hex(session), email, now + SESSION_TTL_MS),
+    db().prepare(`INSERT INTO users (email, name, created_at) VALUES (?, ?, ?) ON CONFLICT(email) DO UPDATE SET name = CASE WHEN users.name = '' THEN excluded.name ELSE users.name END`).bind(email, name, now),
     db().prepare('DELETE FROM sessions WHERE expires_at < ?').bind(now),
   ]);
   return session;
