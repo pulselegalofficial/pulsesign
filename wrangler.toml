@@ -22,6 +22,9 @@ EMAIL_FROM = "Pulse Sign <sign@pulselegal.co>"
 # signed PDF, so the Worker fits the Free plan (10 ms CPU per request).
 # "server": the Worker does it; needs Workers Paid. See README.
 PDF_MODE = "browser"
+# Google OAuth client for staff sign-in. Not a secret (it appears in the
+# sign-in URL); GOOGLE_CLIENT_SECRET is set as a Secret on the Worker.
+GOOGLE_CLIENT_ID = "1021552804825-d3ea4rfpqpm52gs3lqvl0btluml0ktsp.apps.googleusercontent.com"
 
 [[d1_databases]]
 binding = "DB"

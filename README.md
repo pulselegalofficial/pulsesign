@@ -186,8 +186,10 @@ The Worker never loads pdf-lib in browser mode.
    application* with the redirect URI
    `https://sign.pulselegal.co/api/auth/google/callback`.
 5. On the Worker → **Settings → Variables and Secrets**, add as **Secrets**:
-   `RESEND_API_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`. Check
-   `APP_URL`, `STAFF_EMAILS` and `EMAIL_FROM` in `wrangler.toml`.
+   `RESEND_API_KEY` and `GOOGLE_CLIENT_SECRET`. Put the OAuth client ID in
+   `GOOGLE_CLIENT_ID` in `wrangler.toml` (it is not secret). Check `APP_URL`,
+   `STAFF_EMAILS` and `EMAIL_FROM` there too. Plain variables added in the
+   dashboard are replaced by `wrangler.toml` on every deploy; secrets are not.
 6. Add the custom domain (`sign.pulselegal.co`) under **Settings → Domains &
    Routes**.
 
