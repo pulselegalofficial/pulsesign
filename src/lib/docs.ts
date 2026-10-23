@@ -1,10 +1,10 @@
-import { db, files, orgName, appUrl } from './env';
+import { db, files, orgName, appUrl, pdfMode } from './env';
 import { randomId, randomOtp, randomToken, safeEqual, sha256Hex } from './crypto';
 import { buddhistYear, formatDate } from './format';
 import { clampField } from './geometry';
 import { isEmail } from './http';
 import { dict, isLang, type Lang } from './i18n';
-import { buildSignedPdf, inspectPdf, type FieldContent } from './pdf';
+import type { FieldContent } from './pdf';
 import { displayName } from './auth';
 import * as mail from './mailers';
 import {
@@ -26,6 +26,11 @@ import {
  *
  *   draft ─send→ sent ─(a signer opens)→ opened ─(all sign)→ completed
  *                  └──────────┴─→ declined | cancelled | expired
+ *
+ * A completed document gets its final PDF (fields stamped + certificate)
+ * from `acceptFinal`. With PDF_MODE=browser the staff member's browser builds
+ * it; with PDF_MODE=server `finalizeOnServer` does. pdf.ts is only imported
+ * in server mode, so the Free-plan Worker never loads pdf-lib.
  */
 
 export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
@@ -38,6 +43,7 @@ const OTP_RESEND_GAP_MS = 45 * 1000;
 const OTP_MAX_SENDS = 10;
 const SIGNER_SESSION_MS = 2 * 60 * 60 * 1000;
 const MAX_IMAGE_BYTES = 1_500_000;
+const DOWNLOAD_LINK_MS = 30 * 24 * 60 * 60 * 1000;
 
 export const ACTIVE: DocStatus[] = ['sent', 'opened'];
 
@@ -143,15 +149,55 @@ export function titleFromFileName(name: string): string {
   return name.replace(/\.pdf$/i, '').replace(/[_]+/g, ' ').trim().slice(0, 200) || 'Document';
 }
 
-export async function createDraft(user: User, file: File, lang: Lang, actor: Actor): Promise<DocumentRow> {
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  const { pages } = await inspectPdf(bytes);
+export interface UploadMeta {
+  fileName: string;
+  /** Page count and SHA-256 measured by the browser (PDF_MODE=browser). */
+  pages?: number;
+  sha256?: string;
+}
+
+const isPdfHeader = (b: Uint8Array) => b.length > 8 && b[0] === 0x25 && b[1] === 0x50 && b[2] === 0x44 && b[3] === 0x46;
+const isHex64 = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v);
+
+/**
+ * Validates an upload and stores it. In browser mode the page count comes
+ * from the browser (which opened the file with the same library that stamps
+ * it later), and the browser's SHA-256 is handed to R2, which verifies it
+ * against the bytes it received. Either way the Worker does no PDF parsing
+ * or hashing of its own in browser mode.
+ */
+async function storePdf(key: string, bytes: Uint8Array, meta: UploadMeta): Promise<{ pages: number; hash: string }> {
+  if (!isPdfHeader(bytes)) throw new DocError('errBadPdf');
+  let pages: number;
+  let hash: string;
+  if (pdfMode() === 'server') {
+    const { inspectPdf, PdfError } = await import('./pdf');
+    try {
+      pages = (await inspectPdf(bytes)).pages;
+    } catch (e) {
+      if (e instanceof PdfError) throw new DocError(e.code);
+      throw e;
+    }
+    hash = await sha256Hex(bytes);
+  } else {
+    pages = Math.trunc(Number(meta.pages));
+    if (!(pages >= 1 && pages <= 2000) || !isHex64(meta.sha256)) throw new DocError('errBadPdf');
+    hash = meta.sha256;
+  }
+  try {
+    await files().put(key, bytes, { httpMetadata: { contentType: 'application/pdf' }, sha256: hash });
+  } catch {
+    throw new DocError('hashMismatch');
+  }
+  return { pages, hash };
+}
+
+export async function createDraft(user: User, bytes: Uint8Array, meta: UploadMeta, lang: Lang, actor: Actor): Promise<DocumentRow> {
   const now = Date.now();
   const id = await nextDocId(now);
   const fileKey = `docs/${id}/original.pdf`;
-  const hash = await sha256Hex(bytes);
-  await files().put(fileKey, bytes, { httpMetadata: { contentType: 'application/pdf' } });
-  const fileName = file.name.slice(0, 200) || 'document.pdf';
+  const { pages, hash } = await storePdf(fileKey, bytes, meta);
+  const fileName = meta.fileName.slice(0, 200) || 'document.pdf';
   await db().batch([
     db()
       .prepare(
@@ -235,17 +281,15 @@ export async function saveDraft(doc: DocumentRow, input: DraftInput): Promise<vo
 }
 
 /** Swaps the PDF of a draft. Fields beyond the new page count are dropped. */
-export async function replaceDraftFile(doc: DocumentRow, file: File): Promise<void> {
+export async function replaceDraftFile(doc: DocumentRow, bytes: Uint8Array, meta: UploadMeta): Promise<void> {
   if (doc.status !== 'draft') throw new DocError('not_draft', 409);
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  const { pages } = await inspectPdf(bytes);
-  const fileName = file.name.slice(0, 200) || 'document.pdf';
-  await files().put(doc.file_key, bytes, { httpMetadata: { contentType: 'application/pdf' } });
+  const { pages, hash } = await storePdf(doc.file_key, bytes, meta);
+  const fileName = meta.fileName.slice(0, 200) || 'document.pdf';
   const now = Date.now();
   await db().batch([
     db()
       .prepare('UPDATE documents SET file_name = ?, file_size = ?, pages = ?, hash_before = ?, title = ?, updated_at = ? WHERE id = ?')
-      .bind(fileName, bytes.length, pages, await sha256Hex(bytes), titleFromFileName(fileName), now, doc.id),
+      .bind(fileName, bytes.length, pages, hash, titleFromFileName(fileName), now, doc.id),
     db().prepare('DELETE FROM fields WHERE doc_id = ? AND page > ?').bind(doc.id, pages),
   ]);
 }
@@ -507,7 +551,7 @@ export async function submitSignature(
   const signers = await getSigners(doc.id);
   const pending = signers.filter((s) => s.status !== 'signed');
   if (!pending.length) {
-    await finalize(doc.id, request);
+    await complete(doc.id, request);
     return { completed: true, nextSigner: null, signedAt: now };
   }
   let nextSigner: string | null = null;
@@ -551,32 +595,128 @@ async function readR2(key: string): Promise<Uint8Array> {
 }
 
 /**
- * Stamps every field onto the original, appends the certificate, records the
- * final hash and emails everyone a copy. Safe to retry: the status claim makes
- * only one run produce the file.
+ * Every party has signed. Records completion, then either builds the final
+ * PDF here (server mode) or tells the sender to open the document so their
+ * browser builds it (browser mode).
  */
-export async function finalize(docId: string, request: Request): Promise<void> {
+async function complete(docId: string, request: Request): Promise<void> {
   const now = Date.now();
-  const claimed = await db()
+  const doc = await db()
     .prepare(
-      `UPDATE documents SET status = 'completed', completed_at = COALESCE(completed_at, ?), updated_at = ?
-       WHERE id = ? AND (status IN ('sent', 'opened') OR (status = 'completed' AND final_key IS NULL)) RETURNING *`
+      `UPDATE documents SET status = 'completed', completed_at = ?, updated_at = ?
+       WHERE id = ? AND status IN ('sent', 'opened') RETURNING *`
     )
     .bind(now, now, docId)
     .first<DocumentRow>();
-  if (!claimed) return;
-  const doc = claimed;
-  const lang = docLang(doc);
-  const [signers, fields] = await Promise.all([getSigners(doc.id), getFields(doc.id)]);
+  if (!doc) return;
+  await eventStmt(doc.id, 'completed', systemActor(docLang(doc)), null, now).run();
+  if (pdfMode() === 'server') {
+    try {
+      await finalizeOnServer(doc, request);
+      return;
+    } catch (e) {
+      // The signature is recorded; a staff browser can still build the PDF.
+      console.error(e);
+    }
+  }
+  const owner = await getUser(doc.owner_email);
+  await mail.allSigned({ doc, owner, link: `${appUrl(request)}/docs/${doc.id}`, request });
+}
 
-  const hasCompletedEvent = await db()
-    .prepare(`SELECT 1 FROM events WHERE doc_id = ? AND type = 'completed'`)
-    .bind(doc.id)
-    .first();
-  if (!hasCompletedEvent) await logEvent(doc.id, 'completed', systemActor(lang));
-  const events = await getEvents(doc.id);
+/** Everything a browser needs to build the final PDF, minus the binaries. */
+export async function finalizeInput(doc: DocumentRow, request: Request) {
+  const [signers, fields, events, owner] = await Promise.all([getSigners(doc.id), getFields(doc.id), getEvents(doc.id), getUser(doc.owner_email)]);
+  return {
+    doc: {
+      id: doc.id,
+      title: doc.title,
+      pages: doc.pages,
+      lang: doc.lang,
+      hash_before: doc.hash_before,
+      created_at: doc.created_at,
+      completed_at: doc.completed_at,
+    },
+    signers: signers.map((s) => ({
+      id: s.id,
+      position: s.position,
+      name: s.name,
+      email: s.email,
+      signed_at: s.signed_at,
+      otp_verified_at: s.otp_verified_at,
+      ip: s.ip,
+      user_agent: s.user_agent,
+    })),
+    events: events.map((e) => ({ type: e.type, at: e.at, actor_name: e.actor_name, detail: e.detail, ip: e.ip })),
+    fields: fields
+      .filter((f) => f.value)
+      .map((f) => ({
+        id: f.id,
+        signer_pos: f.signer_pos,
+        type: f.type,
+        page: f.page,
+        x: f.x,
+        y: f.y,
+        w: f.w,
+        h: f.h,
+        // Text for name/date; images are fetched separately.
+        value: f.type === 'sig' || f.type === 'initial' ? null : f.value,
+      })),
+    senderName: displayName(owner),
+    orgName: orgName(),
+    verifyUrl: `${appUrl(request)}/verify`,
+  };
+}
 
-  const original = await readR2(doc.file_key);
+/** A signature or initials image, for building the final PDF. */
+export async function fieldImage(doc: DocumentRow, fieldId: string): Promise<R2ObjectBody | null> {
+  const f = await db().prepare('SELECT value, type FROM fields WHERE id = ? AND doc_id = ?').bind(fieldId, doc.id).first<{ value: string | null; type: string }>();
+  if (!f?.value || (f.type !== 'sig' && f.type !== 'initial')) return null;
+  return files().get(f.value);
+}
+
+/**
+ * Stores the final signed PDF, records its hash and emails everyone. Called
+ * with the browser's PDF in browser mode and the Worker's in server mode.
+ * R2 checks the bytes against `sha256`. The first PDF to arrive wins.
+ */
+export async function acceptFinal(doc: DocumentRow, bytes: Uint8Array, sha256: string, request: Request): Promise<void> {
+  if (doc.status !== 'completed' || doc.final_key) throw new DocError('not_needed', 409);
+  if (!isPdfHeader(bytes) || !isHex64(sha256)) throw new DocError('errBadPdf');
+  const key = `docs/${doc.id}/signed-${sha256.slice(0, 16)}.pdf`;
+  try {
+    await files().put(key, bytes, { httpMetadata: { contentType: 'application/pdf' }, sha256 });
+  } catch {
+    throw new DocError('hashMismatch');
+  }
+  const token = randomToken();
+  const now = Date.now();
+  const updated = await db()
+    .prepare(
+      `UPDATE documents SET hash_final = ?, final_key = ?, final_token_hash = ?, final_token_expires = ?, updated_at = ?
+       WHERE id = ? AND status = 'completed' AND final_key IS NULL RETURNING *`
+    )
+    .bind(sha256, key, await sha256Hex(token), now + DOWNLOAD_LINK_MS, now, doc.id)
+    .first<DocumentRow>();
+  if (!updated) {
+    // Another browser got there first. Remove this copy unless it is the same file.
+    const current = await getDoc(doc.id);
+    if (current?.final_key !== key) await files().delete(key);
+    throw new DocError('not_needed', 409);
+  }
+  const [signers, owner] = await Promise.all([getSigners(doc.id), getUser(doc.owner_email)]);
+  await mail.completed({
+    doc: updated,
+    recipients: [...signers.map((s) => ({ name: s.name, email: s.email })), { name: displayName(owner), email: owner.email }],
+    downloadUrl: `${appUrl(request)}/dl/${doc.id}?t=${token}`,
+    request,
+  });
+}
+
+/** Server mode: stamps every field and appends the certificate in the Worker. */
+async function finalizeOnServer(doc: DocumentRow, request: Request): Promise<void> {
+  const { buildSignedPdf } = await import('./pdf');
+  const input = await finalizeInput(doc, request);
+  const fields = await getFields(doc.id);
   const contents: FieldContent[] = [];
   const signatures = new Map<number, Uint8Array>();
   for (const f of fields) {
@@ -589,31 +729,25 @@ export async function finalize(docId: string, request: Request): Promise<void> {
       contents.push({ field: f, text: f.value });
     }
   }
-  const owner = await getUser(doc.owner_email);
-  const base = appUrl(request);
-  const finalBytes = await buildSignedPdf(original, contents, {
+  const bytes = await buildSignedPdf(await readR2(doc.file_key), contents, {
     doc,
-    signers,
-    events,
+    signers: await getSigners(doc.id),
+    events: await getEvents(doc.id),
     signatures,
-    senderName: displayName(owner),
-    orgName: orgName(),
-    verifyUrl: `${base}/verify`,
+    senderName: input.senderName,
+    orgName: input.orgName,
+    verifyUrl: input.verifyUrl,
   });
-  const hash = await sha256Hex(finalBytes);
-  const finalKey = `docs/${doc.id}/signed.pdf`;
-  await files().put(finalKey, finalBytes, { httpMetadata: { contentType: 'application/pdf' } });
-  await db()
-    .prepare('UPDATE documents SET hash_final = ?, final_key = ?, updated_at = ? WHERE id = ?')
-    .bind(hash, finalKey, Date.now(), doc.id)
-    .run();
+  await acceptFinal(doc, bytes, await sha256Hex(bytes), request);
+}
 
-  await mail.completed({
-    doc: { ...doc, hash_final: hash, final_key: finalKey },
-    recipients: [...signers.map((s) => ({ name: s.name, email: s.email })), { name: displayName(owner), email: owner.email }],
-    pdf: finalBytes,
-    request,
-  });
+/** Resolves the download link from the completion email. */
+export async function byDownloadToken(docId: string, token: string): Promise<DocumentRow | null> {
+  if (!token || token.length > 100) return null;
+  const doc = await getDoc(docId);
+  if (!doc?.final_key || !doc.final_token_hash || !doc.final_token_expires) return null;
+  if (doc.final_token_expires < Date.now()) return null;
+  return safeEqual(doc.final_token_hash, await sha256Hex(token)) ? doc : null;
 }
 
 export function signedFileName(doc: DocumentRow): string {

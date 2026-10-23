@@ -65,11 +65,14 @@ signs. Off, everyone is emailed at once.
 
 ### Completion and evidence
 
-When the last signer signs, the Worker stamps every field onto the original
-PDF, appends a **certificate of completion** (document facts, SHA-256 of the
-original, each signer's signature, time, OTP verification, IP and device, and
-the full audit trail), stores the result in R2 and emails it to every signer
-and the sender.
+When the last signer signs, the document is marked completed. Then every field
+is stamped onto the original PDF and a **certificate of completion** is
+appended (document facts, SHA-256 of the original, each signer's signature,
+time, OTP verification, IP and device, and the full audit trail). The result
+is stored in R2 and every signer and the sender get an email with it attached
+(Resend fetches the attachment from a 30-day download link).
+
+Where the stamping happens depends on `PDF_MODE`; see below.
 
 The SHA-256 of that final file is recorded and can be checked at `/verify`,
 which is public. The hash is computed in the browser; the file is never
@@ -105,14 +108,41 @@ src/lib/             Logic, no framework code
   i18n.ts              Every UI string, Thai and English
   format.ts            Dates (Bangkok time, Buddhist era), user agents
 src/pages/           Pages and API routes
-src/scripts/         Browser code: wizard, signer flow, PDF rendering (pdf.js)
+src/scripts/         Browser code: wizard, signer flow, PDF rendering (pdf.js),
+                     pdfwork.ts: upload checks and final PDF in browser mode
 src/test/            Unit tests
 ```
 
-## Cloudflare setup (one time)
+## Free plan vs Workers Paid (`PDF_MODE`)
 
-Requires **Workers Paid** ($5/month): stamping a PDF needs far more CPU time
-than the Free plan's 10 ms per request.
+Cloudflare's Free plan allows **10 ms of CPU per request**. Reading a PDF takes
+a few ms; building the final signed PDF takes 150–500 ms. So `PDF_MODE` in
+`wrangler.toml` decides where PDF work runs:
+
+| | `browser` (default, Free plan) | `server` (Workers Paid, $5/month) |
+|---|---|---|
+| Upload check (page count, encryption) | Staff browser | Worker |
+| SHA-256 of uploads | Staff browser, verified by R2 on store | Worker |
+| Final signed PDF + certificate | Staff browser | Worker, right after the last signature |
+| When copies are emailed | When a staff member next opens Pulse Sign (dashboard or the document) | Immediately |
+
+In browser mode, when the last signer signs, the sender gets an "all signed"
+email linking to the document. Opening it (or the dashboard) builds the PDF in
+the browser with the same code the Worker would use (`src/lib/pdf.ts`),
+uploads it, and the server stores it and emails everyone. R2 checks the
+uploaded bytes against the hash the browser sent, and only the first upload
+for a document is accepted.
+
+The trade-off: in browser mode the final file is produced on a firm computer
+rather than the server, and copies go out only once someone at the firm opens
+the app. The original's hash, the signature images, the audit trail and the
+timestamps are recorded on the server either way.
+
+**To switch to server mode:** upgrade to Workers Paid, set
+`PDF_MODE = "server"` in `wrangler.toml`, and redeploy. Nothing else changes.
+The Worker never loads pdf-lib in browser mode.
+
+## Cloudflare setup (one time)
 
 1. Create the database, bucket and (unused, required by the Astro adapter) KV
    namespace, and put the two IDs into `wrangler.toml`:
@@ -157,6 +187,9 @@ a test checks both languages use the same `{placeholders}`.
   email link only.
 - **No retention policy.** Originals, signature images and signed PDFs are
   kept in R2 indefinitely; there is no delete for sent documents.
+- **Free plan headroom.** In browser mode every request should stay under
+  10 ms of CPU, but very large dashboards were not measured on Cloudflare
+  itself. Check **Workers → pulsesign → Metrics → CPU time** after launch.
 - **Data location.** D1 and R2 do not offer storage in Thailand. The PDPA
   notice signers see says data is encrypted at rest on Cloudflare; review it
   against the firm's cross-border transfer position.

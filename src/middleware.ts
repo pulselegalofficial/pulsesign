@@ -3,7 +3,7 @@ import { SESSION_COOKIE, readCookie, userFromSession } from './lib/auth';
 import { detectLang } from './lib/i18n';
 
 /** Paths anyone may open. Everything else requires a staff session. */
-const PUBLIC = [/^\/login$/, /^\/auth$/, /^\/api\/auth\//, /^\/s\//, /^\/api\/sign\//, /^\/verify$/, /^\/api\/verify$/, /^\/api\/lang$/];
+const PUBLIC = [/^\/login$/, /^\/auth$/, /^\/api\/auth\//, /^\/s\//, /^\/api\/sign\//, /^\/verify$/, /^\/api\/verify$/, /^\/api\/lang$/, /^\/dl\//];
 
 const SECURITY_HEADERS: Record<string, string> = {
   'x-frame-options': 'DENY',

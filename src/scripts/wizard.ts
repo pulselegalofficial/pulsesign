@@ -1,5 +1,6 @@
 import { ApiError, api, fill, h, isEmail, strings, toast } from './ui';
 import { renderPdf, type RenderedPage } from './pdfview';
+import { UploadCheckError, inspectUpload, uploadInit } from './pdfwork';
 
 type FieldType = 'sig' | 'initial' | 'name' | 'date';
 interface Field {
@@ -482,20 +483,21 @@ async function upload(file: File, replace: boolean) {
   state.busy = true;
   renderActionBar();
   try {
-    const form = new FormData();
-    form.append('file', file);
+    // The browser opens the PDF and hashes it; the Worker only stores it.
+    const checked = await inspectUpload(file);
     if (replace && state.doc) {
       await saveNow();
-      await api(`/api/docs/${state.doc.id}/file`, { method: 'POST', body: form });
+      await api(`/api/docs/${state.doc.id}/file`, uploadInit(file, checked));
       await load(state.doc.id);
     } else {
-      const { id } = await api<{ id: string }>('/api/docs', { method: 'POST', body: form });
+      const { id } = await api<{ id: string }>('/api/docs', uploadInit(file, checked));
       await load(id);
       history.replaceState(null, '', `/new?id=${id}&step=1`);
     }
     msg.hidden = true;
   } catch (e) {
-    fail(e instanceof ApiError && t[e.code] ? t[e.code] : t.errGeneric);
+    const code = e instanceof ApiError || e instanceof UploadCheckError ? e.code : '';
+    fail(t[code] || t.errGeneric);
   } finally {
     state.busy = false;
     render();

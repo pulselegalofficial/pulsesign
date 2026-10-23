@@ -91,7 +91,7 @@ const clientConfig = ctx
           </div>
           <h1 class="s-h1">{t.doneTitle}</h1>
           <p class="muted done-body">
-            {doc.status === 'completed' ? t.doneBodyFinal : t.doneBody}
+            {doc.status !== 'completed' ? t.doneBody : doc.final_key ? t.doneBodyFinal : t.doneBodyPending}
             <br />
             <strong style="color:var(--ink)">{signer.email}</strong>
           </p>

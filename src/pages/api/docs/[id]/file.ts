@@ -1,8 +1,8 @@
 import type { APIRoute } from 'astro';
-import { DocError, getDoc, MAX_UPLOAD_BYTES, replaceDraftFile } from '../../../../lib/docs';
+import { DocError, getDoc, replaceDraftFile } from '../../../../lib/docs';
 import { files } from '../../../../lib/env';
 import { fail, json, notFound, pdfResponse, unauthorized } from '../../../../lib/http';
-import { PdfError } from '../../../../lib/pdf';
+import { readUpload } from '../../../../lib/upload';
 
 /** The original upload. */
 export const GET: APIRoute = async ({ params, locals }) => {
@@ -14,20 +14,18 @@ export const GET: APIRoute = async ({ params, locals }) => {
   return pdfResponse(obj.body, doc.file_name);
 };
 
-/** Replace the PDF of a draft. */
+/** Replace the PDF of a draft (raw body, see lib/upload.ts). */
 export const POST: APIRoute = async ({ params, request, locals }) => {
   if (!locals.user) return unauthorized();
   const doc = await getDoc(params.id!);
   if (!doc) return notFound();
-  const form = await request.formData().catch(() => null);
-  const file = form?.get('file');
-  if (!(file instanceof File)) return fail('errNotPdf');
-  if (file.size > MAX_UPLOAD_BYTES) return fail('errTooLarge', 413);
+  const upload = await readUpload(request);
+  if ('error' in upload) return fail(upload.error, upload.status);
   try {
-    await replaceDraftFile(doc, file);
+    await replaceDraftFile(doc, upload.bytes, upload.meta);
     return json({ ok: true });
   } catch (e) {
-    if (e instanceof PdfError || e instanceof DocError) return fail(e instanceof PdfError ? e.code : e.code, 400);
+    if (e instanceof DocError) return fail(e.code, e.status);
     throw e;
   }
 };

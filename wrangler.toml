@@ -10,9 +10,6 @@ name = "pulsesign"
 compatibility_date = "2026-08-19"
 compatibility_flags = ["nodejs_compat"]
 
-# PDF stamping runs in the Worker and needs far more than the Free plan's
-# 10 ms of CPU per request. Requires Workers Paid (30 s by default).
-
 [vars]
 # Public URL the signing links in emails point at, no trailing slash.
 APP_URL = "https://sign.pulselegal.co"
@@ -21,6 +18,10 @@ ORG_NAME = "Pulse Legal"
 # with "@" allows a whole domain, e.g. "@pulselegal.co".
 STAFF_EMAILS = "@pulselegal.co"
 EMAIL_FROM = "Pulse Sign <sign@pulselegal.co>"
+# "browser": the staff member's browser checks uploads and builds the final
+# signed PDF, so the Worker fits the Free plan (10 ms CPU per request).
+# "server": the Worker does it; needs Workers Paid. See README.
+PDF_MODE = "browser"
 
 [[d1_databases]]
 binding = "DB"

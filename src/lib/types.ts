@@ -29,6 +29,8 @@ export interface DocumentRow {
   hash_before: string;
   hash_final: string | null;
   final_key: string | null;
+  final_token_hash: string | null;
+  final_token_expires: number | null;
   created_at: number;
   updated_at: number;
   sent_at: number | null;

@@ -37,11 +37,23 @@ const finalPending = doc.status === 'completed' && !doc.final_key;
   <div class="actions">
     {doc.final_key && <a class="btn" href={`/api/docs/${doc.id}/signed?download`}>{t.download}</a>}
     {doc.final_key && <a class="btn btn-ghost" href={`/api/docs/${doc.id}/signed#page=${doc.pages + 1}`} target="_blank" rel="noopener">{t.downloadCert}</a>}
-    {finalPending && <button class="btn" type="button" id="finalize">{t.download}</button>}
     {active && <button class="btn" type="button" id="remind">{t.resend}</button>}
     <a class="btn btn-ghost" href={`/api/docs/${doc.id}/file`} target="_blank" rel="noopener">{t.downloadOriginal}</a>
     {active && <button class="btn btn-danger" type="button" id="cancel">{t.cancelReq}</button>}
   </div>
+
+  {
+    finalPending && (
+      <div class="card finalizing" id="finalizing">
+        <span class="spinner" />
+        <div>
+          <strong id="fin-title">{t.finalizing}</strong>
+          <p class="small muted" id="fin-note">{t.finalizingNote}</p>
+        </div>
+        <button class="btn btn-sm" type="button" id="fin-retry" hidden>{t.retry}</button>
+      </div>
+    )
+  }
 
   <div class="grid">
     <section class="card audit">
@@ -109,13 +121,13 @@ const finalPending = doc.status === 'completed' && !doc.final_key;
       </div>
     </div>
   </div>
-  <script type="application/json" id="detail-config" set:html={JSON.stringify({ id: doc.id, justSent })} />
+  <script type="application/json" id="detail-config" set:html={JSON.stringify({ id: doc.id, justSent, finalPending })} />
 </App>
 
 <script>
-  import { api, strings, toast } from '../../scripts/ui';
+  import { ApiError, api, strings, toast } from '../../scripts/ui';
   const t = strings();
-  const { id, justSent } = JSON.parse(document.getElementById('detail-config')!.textContent!);
+  const { id, justSent, finalPending } = JSON.parse(document.getElementById('detail-config')!.textContent!);
   if (justSent) {
     toast(t.sentToast);
     history.replaceState(null, '', location.pathname);
@@ -145,11 +157,28 @@ const finalPending = doc.status === 'completed' && !doc.final_key;
       toast(t.errGeneric, true);
     }
   });
-  document.getElementById('finalize')?.addEventListener('click', async (e) => {
-    (e.currentTarget as HTMLButtonElement).disabled = true;
-    await api(`/api/docs/${id}/finalize`, { method: 'POST' }).catch(() => toast(t.errGeneric, true));
-    location.reload();
-  });
+  // Everyone has signed: this browser builds the final PDF (PDF_MODE=browser).
+  async function finalize() {
+    const retry = document.getElementById('fin-retry')!;
+    retry.hidden = true;
+    document.getElementById('fin-title')!.textContent = t.finalizing;
+    document.getElementById('finalizing')!.classList.remove('failed');
+    try {
+      const { finalizeDocument } = await import('../../scripts/pdfwork');
+      await finalizeDocument(id);
+      location.reload();
+    } catch (e) {
+      if (e instanceof ApiError && e.code === 'not_needed') return location.reload();
+      console.error(e);
+      document.getElementById('fin-title')!.textContent = t.finalizeFailed;
+      document.getElementById('finalizing')!.classList.add('failed');
+      retry.hidden = false;
+    }
+  }
+  if (finalPending) {
+    document.getElementById('fin-retry')!.addEventListener('click', finalize);
+    void finalize();
+  }
 </script>
 
 <style>
@@ -173,6 +202,37 @@ const finalPending = doc.status === 'completed' && !doc.final_key;
     gap: 10px;
     flex-wrap: wrap;
     margin-bottom: 22px;
+  }
+  .finalizing {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 20px;
+    background: var(--peach-2);
+    border: 1.5px solid var(--peach);
+  }
+  .finalizing div {
+    flex: 1;
+  }
+  .finalizing p {
+    margin: 2px 0 0;
+  }
+  .finalizing.failed .spinner {
+    display: none;
+  }
+  .spinner {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border: 3px solid var(--peach);
+    border-top-color: var(--pulse);
+    animation: spin 0.8s linear infinite;
+    flex: none;
+  }
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
   .grid {
     display: grid;

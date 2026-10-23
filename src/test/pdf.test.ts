@@ -21,7 +21,7 @@ const now = Date.UTC(2026, 9, 22, 7, 0, 0);
 const doc: DocumentRow = {
   id: 'PS-2569-0001', owner_email: 'n@pulselegal.co', title: 'สัญญาว่าจ้างที่ปรึกษากฎหมาย – บจก. สยามฟู้ดส์ ฉบับที่มีชื่อยาวมากเพื่อทดสอบการตัดบรรทัด',
   file_name: 'a.pdf', file_key: 'k', file_size: 1, pages: 2, lang: 'th', status: 'completed', sequential: 1,
-  subject: '', message: '', expiry_days: 14, hash_before: 'a'.repeat(64), hash_final: null, final_key: null,
+  subject: '', message: '', expiry_days: 14, hash_before: 'a'.repeat(64), hash_final: null, final_key: null, final_token_hash: null, final_token_expires: null,
   created_at: now, updated_at: now, sent_at: now, expires_at: now, completed_at: now + 60_000,
 };
 const signer = (position: number, name: string, email: string): SignerRow => ({

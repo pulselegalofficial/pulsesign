@@ -8,8 +8,10 @@ import { env } from './env';
 
 export interface Attachment {
   filename: string;
-  /** Base64 content. */
-  content: string;
+  /** Base64 content, or… */
+  content?: string;
+  /** …a URL Resend downloads the file from. Keeps base64 work off the Worker. */
+  path?: string;
 }
 
 export interface Email {
@@ -26,7 +28,7 @@ export async function sendEmail(message: Email): Promise<void> {
   if (!RESEND_API_KEY) {
     console.log(
       `\n──── email (not sent: RESEND_API_KEY unset) ────\nTo: ${message.to}\nSubject: ${message.subject}\n` +
-        `${message.text}\n${(message.attachments || []).map((a) => `[attachment ${a.filename}]`).join('\n')}\n────────────────\n`
+        `${message.text}\n${(message.attachments || []).map((a) => `[attachment ${a.filename}${a.path ? ` from ${a.path}` : ''}]`).join('\n')}\n────────────────\n`
     );
     return;
   }

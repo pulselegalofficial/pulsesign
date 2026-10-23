@@ -1,5 +1,5 @@
 import { appUrl, orgName } from './env';
-import { renderEmail, sendEmail, toBase64 } from './email';
+import { renderEmail, sendEmail } from './email';
 import { formatDate } from './format';
 import { dict, fill, isLang, type Lang } from './i18n';
 import type { DocumentRow, SignerRow, User } from './types';
@@ -8,8 +8,6 @@ import type { DocumentRow, SignerRow, User } from './types';
 
 const langOf = (doc: DocumentRow): Lang => (isLang(doc.lang) ? doc.lang : 'th');
 const logo = (request: Request) => `${appUrl(request)}/email-logo.png`;
-/** Resend's limit is 40 MB per email including encoding overhead. */
-const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 
 export async function signRequest(o: {
   doc: DocumentRow;
@@ -62,35 +60,43 @@ export async function login(o: { email: string; link: string; lang: Lang; reques
 export async function completed(o: {
   doc: DocumentRow;
   recipients: { name: string; email: string }[];
-  pdf: Uint8Array;
+  /** Time-limited link to the signed PDF; Resend attaches it from there. */
+  downloadUrl: string;
   request: Request;
 }) {
   const t = dict(langOf(o.doc));
-  const attach = o.pdf.length <= MAX_ATTACHMENT_BYTES;
-  const filename = `${o.doc.id}_signed.pdf`;
-  const content = attach ? toBase64(o.pdf) : '';
   const body = renderEmail({
     logoUrl: logo(o.request),
     heading: fill(t.emDoneSubject, { title: o.doc.title }),
-    paragraphs: [fill(t.emDoneBody, { title: o.doc.title }), ...(attach ? [] : [t.emDoneTooLarge])],
-    footer: [`${t.docId} ${o.doc.id}`, `SHA-256 ${o.doc.hash_final}`, `${t.verifyLink}: ${appUrl(o.request)}/verify`],
+    paragraphs: [fill(t.emDoneBody, { title: o.doc.title })],
+    button: { label: t.emDownload, url: o.downloadUrl },
+    footer: [t.emDownloadExpiry, `${t.docId} ${o.doc.id}`, `SHA-256 ${o.doc.hash_final}`, `${t.verifyLink}: ${appUrl(o.request)}/verify`],
   });
+  const attachments = [{ filename: `${o.doc.id}_signed.pdf`, path: o.downloadUrl }];
   const seen = new Set<string>();
   for (const r of o.recipients) {
     if (seen.has(r.email)) continue;
     seen.add(r.email);
     try {
-      await sendEmail({
-        to: r.email,
-        subject: fill(t.emDoneSubject, { title: o.doc.title }),
-        ...body,
-        attachments: attach ? [{ filename, content }] : undefined,
-      });
+      await sendEmail({ to: r.email, subject: fill(t.emDoneSubject, { title: o.doc.title }), ...body, attachments });
     } catch (e) {
       // One bad address must not stop the others from getting their copy.
       console.error(e);
     }
   }
+}
+
+/** Browser mode: tells the sender to open the document so the PDF gets built. */
+export async function allSigned(o: { doc: DocumentRow; owner: User; link: string; request: Request }) {
+  const t = dict(langOf(o.doc));
+  const body = renderEmail({
+    logoUrl: logo(o.request),
+    heading: fill(t.emAllSignedSubject, { title: o.doc.title }),
+    paragraphs: [fill(t.emAllSignedBody, { title: o.doc.title })],
+    button: { label: t.emViewDoc, url: o.link },
+    footer: [`${t.docId} ${o.doc.id}`],
+  });
+  await sendEmail({ to: o.owner.email, subject: fill(t.emAllSignedSubject, { title: o.doc.title }), ...body });
 }
 
 export async function declined(o: { doc: DocumentRow; signer: SignerRow; reason: string; owner: User; request: Request }) {
