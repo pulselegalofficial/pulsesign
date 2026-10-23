@@ -52,8 +52,8 @@ describe('Google sign-in round trip', () => {
     const start = await startGoogleLogin('https://x/cb', '/');
     vi.stubGlobal('fetch', vi.fn());
     const r = await finishGoogleLogin(new URLSearchParams({ state: 'forged', code: 'abc' }), start.cookieValue, 'https://x/cb');
-    expect(r).toEqual({ ok: false, error: 'state' });
-    expect(await finishGoogleLogin(new URLSearchParams({ state: 'x', code: 'abc' }), undefined, 'https://x/cb')).toEqual({ ok: false, error: 'state' });
+    expect(r).toMatchObject({ ok: false, error: 'state' });
+    expect(await finishGoogleLogin(new URLSearchParams({ state: 'x', code: 'abc' }), undefined, 'https://x/cb')).toMatchObject({ ok: false, error: 'state' });
   });
 
   it('never redirects off-site after sign-in', async () => {
@@ -69,6 +69,29 @@ describe('Google sign-in round trip', () => {
     const state = new URL(start.url).searchParams.get('state')!;
     vi.stubGlobal('fetch', vi.fn(async () => new Response('bad', { status: 400 })));
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    expect(await finishGoogleLogin(new URLSearchParams({ state, code: 'c' }), start.cookieValue, 'https://x/cb')).toEqual({ ok: false, error: 'google' });
+    expect(await finishGoogleLogin(new URLSearchParams({ state, code: 'c' }), start.cookieValue, 'https://x/cb')).toEqual({ ok: false, error: 'google', detail: 'token:http_400' });
+  });
+
+  it('reports Google’s error code when the code exchange fails', async () => {
+    const start = await startGoogleLogin('https://x/cb', '/');
+    const state = new URL(start.url).searchParams.get('state')!;
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: 'invalid_client' }), { status: 401 })));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(await finishGoogleLogin(new URLSearchParams({ state, code: 'c' }), start.cookieValue, 'https://x/cb')).toEqual({
+      ok: false,
+      error: 'google',
+      detail: 'token:invalid_client',
+    });
+  });
+
+  it('trims a client secret pasted with whitespace', async () => {
+    env.GOOGLE_CLIENT_SECRET = '  secret\n';
+    const start = await startGoogleLogin('https://x/cb', '/');
+    const state = new URL(start.url).searchParams.get('state')!;
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ id_token: jwt(good) })));
+    vi.stubGlobal('fetch', fetchMock);
+    await finishGoogleLogin(new URLSearchParams({ state, code: 'c' }), start.cookieValue, 'https://x/cb');
+    const body = new URLSearchParams(String(((fetchMock.mock.calls[0] as unknown[])[1] as RequestInit).body));
+    expect(body.get('client_secret')).toBe('secret');
   });
 });

@@ -10,6 +10,11 @@ name = "pulsesign"
 compatibility_date = "2026-08-19"
 compatibility_flags = ["nodejs_compat"]
 
+# Keep Worker logs (console output and errors) in the dashboard:
+# Worker → Observability → Logs.
+[observability]
+enabled = true
+
 [vars]
 # Public URL the signing links in emails point at, no trailing slash.
 APP_URL = "https://sign.pulselegal.co"
