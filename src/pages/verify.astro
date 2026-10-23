@@ -50,6 +50,13 @@ const isPublic = !Astro.locals.user;
         <div><dt>{t.completedAt}</dt><dd id="v-done"></dd></div>
         <div><dt>{t.colSigners}</dt><dd id="v-signers"></dd></div>
       </dl>
+      <section class="evidence" id="v-evidence" hidden>
+        <h3>{t.verifyEvidence}</h3>
+        <p class="small muted">{t.verifyEvidenceSub}</p>
+        <div class="ev-signers" id="v-ev-signers"></div>
+        <h3 class="ev-audit-h">{t.audit}</h3>
+        <ol class="ev-audit" id="v-audit"></ol>
+      </section>
       <button class="btn btn-soft" type="button" id="v-again">{t.verifyAnother}</button>
     </div>
 
@@ -70,6 +77,60 @@ const isPublic = !Astro.locals.user;
     const date = lang === 'th' ? `${d.getUTCDate()} ${MTH_TH[d.getUTCMonth()]} ${d.getUTCFullYear() + 543}` : `${d.getUTCDate()} ${MTH_EN[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
     return `${date} · ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
   }
+  interface VerifiedDoc {
+    id: string;
+    title: string;
+    completedAt: number;
+    signers: { name: string; signedAt: number | null; ip: string; device: string }[];
+    events: { at: number; label: string; by: string; ip: string }[];
+  }
+  function el(tag: string, cls: string, text = '') {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    e.textContent = text;
+    return e;
+  }
+  function fmtS(ts: number) {
+    const d = new Date(ts + 7 * 3600 * 1000);
+    return `${fmt(ts)}:${String(d.getUTCSeconds()).padStart(2, '0')}`;
+  }
+  function renderEvidence(doc: VerifiedDoc) {
+    const box = $('v-ev-signers');
+    box.replaceChildren();
+    doc.signers.forEach((s, i) => {
+      const card = el('div', 'ev-signer');
+      const head = el('div', 'ev-name');
+      head.appendChild(el('span', 'ev-num', String(i + 1)));
+      head.appendChild(el('strong', '', s.name));
+      card.appendChild(head);
+      const dl = el('dl', 'ev-dl');
+      const rows: [string, string, string][] = [
+        [t.signedAt, s.signedAt ? fmtS(s.signedAt) : '—', 'mono'],
+        ['IP', s.ip || '—', 'mono'],
+        [t.device, s.device || '—', ''],
+      ];
+      for (const [k, v, c] of rows) {
+        const row = el('div', '');
+        row.appendChild(el('dt', '', k));
+        row.appendChild(el('dd', c, v));
+        dl.appendChild(row);
+      }
+      card.appendChild(dl);
+      box.appendChild(card);
+    });
+    const list = $('v-audit');
+    list.replaceChildren();
+    for (const e of doc.events) {
+      const li = el('li', '');
+      li.appendChild(el('span', 'ev-time mono', fmtS(e.at)));
+      const body = el('div', 'ev-body');
+      body.appendChild(el('span', 'ev-label', e.label));
+      body.appendChild(el('span', 'ev-meta small muted', e.ip ? `${e.by} · IP ${e.ip}` : e.by));
+      li.appendChild(body);
+      list.appendChild(li);
+    }
+    $('v-evidence').hidden = false;
+  }
   async function check(file: File) {
     $('v-drop').hidden = true;
     $('v-busy').hidden = false;
@@ -77,7 +138,7 @@ const isPublic = !Astro.locals.user;
     const buf = await file.arrayBuffer();
     const digest = await crypto.subtle.digest('SHA-256', buf);
     const hex = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
-    let data: { match: boolean; doc?: { id: string; title: string; completedAt: number; signers: string[] } } = { match: false };
+    let data: { match: boolean; doc?: VerifiedDoc } = { match: false };
     try {
       data = await (await fetch(`/api/verify?hash=${hex}`)).json();
     } catch {
@@ -93,11 +154,13 @@ const isPublic = !Astro.locals.user;
     $('v-title').textContent = data.match ? t.match : t.noMatch;
     $('v-sub').textContent = data.match ? t.matchSub : t.noMatchSub;
     $('v-facts').hidden = !data.match;
+    $('v-evidence').hidden = true;
     if (data.match && data.doc) {
       $('v-doc').textContent = data.doc.title;
       $('v-id').textContent = data.doc.id;
       $('v-done').textContent = fmt(data.doc.completedAt);
-      $('v-signers').textContent = data.doc.signers.join(', ');
+      $('v-signers').textContent = data.doc.signers.map((s) => s.name).join(', ');
+      renderEvidence(data.doc);
     }
   }
   const input = $('v-file') as HTMLInputElement;
@@ -245,9 +308,109 @@ const isPublic = !Astro.locals.user;
   .privacy {
     margin-top: 18px;
   }
+  .evidence {
+    width: 100%;
+    border-top: 1px solid var(--mint-line);
+    padding-top: 16px;
+    margin-bottom: 8px;
+  }
+  .evidence h3 {
+    margin: 0;
+    font-size: 16px;
+  }
+  .evidence > p {
+    margin: 4px 0 12px;
+  }
+  .ev-signers {
+    display: grid;
+    gap: 10px;
+  }
+  .ev-signers :global(.ev-signer) {
+    border: 1px solid var(--mint-line);
+    border-radius: 12px;
+    padding: 12px 14px;
+  }
+  .ev-signers :global(.ev-name) {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+  .ev-signers :global(.ev-num) {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--mint);
+    color: var(--forest);
+    font-weight: 700;
+    font-size: 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+  }
+  .ev-signers :global(.ev-dl) {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px 14px;
+    margin: 0;
+  }
+  .ev-signers :global(.ev-dl dt) {
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .ev-signers :global(.ev-dl dd) {
+    margin: 2px 0 0;
+    font-size: 13.5px;
+    overflow-wrap: anywhere;
+  }
+  .ev-audit-h {
+    margin-top: 20px !important;
+  }
+  .ev-audit {
+    list-style: none;
+    padding: 0;
+    margin: 10px 0 0;
+    border-left: 2px solid var(--mint-line);
+  }
+  .ev-audit :global(li) {
+    display: grid;
+    grid-template-columns: 180px 1fr;
+    gap: 12px;
+    padding: 7px 0 7px 14px;
+    position: relative;
+  }
+  .ev-audit :global(li)::before {
+    content: '';
+    position: absolute;
+    left: -5px;
+    top: 13px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--forest);
+  }
+  .ev-audit :global(.ev-time) {
+    font-size: 12.5px;
+    color: var(--muted);
+    padding-top: 1px;
+  }
+  .ev-audit :global(.ev-body) {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .ev-audit :global(.ev-label) {
+    font-size: 14px;
+  }
   @media (max-width: 600px) {
-    .facts {
+    .facts,
+    .ev-signers :global(.ev-dl) {
       grid-template-columns: 1fr;
+    }
+    .ev-audit :global(li) {
+      grid-template-columns: 1fr;
+      gap: 2px;
     }
   }
 </style>

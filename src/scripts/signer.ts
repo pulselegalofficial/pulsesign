@@ -14,6 +14,33 @@ interface SField {
   val: string | null;
 }
 
+/** A field another signer has already filled; shown read-only. */
+interface OtherField {
+  id: string;
+  type: FieldType;
+  page: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  signer: string;
+  text: string | null;
+}
+interface CoSigner {
+  name: string;
+  me: boolean;
+  signed: boolean;
+  signedAt: number | null;
+}
+interface FieldsResponse {
+  fields: Omit<SField, 'val'>[];
+  others: OtherField[];
+  signers: CoSigner[];
+}
+
+/** How often the signing page checks whether someone else has signed. */
+const POLL_MS = 20_000;
+
 const configEl = document.getElementById('signer-config');
 if (configEl) void main(JSON.parse(configEl.textContent!));
 
@@ -29,6 +56,9 @@ async function main(cfg: { token: string; step: string; signerName: string; init
   let initImg: string | null = null;
   let sheetFor: number | null = null;
   let busy = false;
+  let others: OtherField[] = [];
+  let coSigners: CoSigner[] = [];
+  let pollTimer: number | undefined;
 
   function show(step: string) {
     document.querySelectorAll<HTMLElement>('[data-step]').forEach((el) => (el.hidden = el.dataset.step !== step));
@@ -124,7 +154,9 @@ async function main(cfg: { token: string; step: string; signerName: string; init
   async function loadReview() {
     if (pages.length) return;
     try {
-      const data = await api<{ fields: Omit<SField, 'val'>[] }>(`${base}/fields`);
+      const data = await api<FieldsResponse>(`${base}/fields`);
+      others = data.others || [];
+      coSigners = data.signers || [];
       fields = data.fields
         .map((f) => ({ ...f, val: null as string | null }))
         .sort((a, b) => a.page - b.page || a.y - b.y || a.x - b.x);
@@ -136,6 +168,8 @@ async function main(cfg: { token: string; step: string; signerName: string; init
       active = fields.findIndex((f) => !f.val);
       paintFields();
       paintBar();
+      paintCoSigners();
+      startPolling();
       if (active >= 0) setTimeout(() => scrollToField(active), 300);
     } catch (e) {
       console.error(e);
@@ -143,11 +177,88 @@ async function main(cfg: { token: string; step: string; signerName: string; init
     }
   }
 
-  const isImg = (f: SField) => f.type === 'sig' || f.type === 'initial';
+  const isImg = (f: { type: FieldType }) => f.type === 'sig' || f.type === 'initial';
+  const fieldName = (type: FieldType) => (type === 'sig' ? t.fSig : type === 'initial' ? t.fInitial : type === 'date' ? t.fDate : t.fName);
+  const fillIn = (s: string, vars: Record<string, string>) => s.replace(/\{(\w+)\}/g, (m, k) => vars[k] ?? m);
+
+  /** What other signers have already put on the page; not interactive. */
+  function otherEl(o: OtherField) {
+    const el = document.createElement('div');
+    el.className = 'ofld';
+    el.style.cssText = `left:${o.x * 100}%;top:${o.y * 100}%;width:${o.w * 100}%;height:${o.h * 100}%`;
+    const by = fillIn(t.coSignedBy, { name: o.signer });
+    el.title = `${fieldName(o.type)} · ${by}`;
+    if (isImg(o)) {
+      const img = document.createElement('img');
+      img.src = `${base}/field-image/${encodeURIComponent(o.id)}`;
+      img.alt = el.title;
+      el.appendChild(img);
+    } else {
+      const s = document.createElement('span');
+      s.className = 'txt';
+      s.textContent = o.text || '';
+      el.appendChild(s);
+    }
+    const tag = document.createElement('span');
+    tag.className = 'otag';
+    tag.textContent = o.signer;
+    el.appendChild(tag);
+    return el;
+  }
+
+  function paintCoSigners() {
+    const box = $('co-signers');
+    if (!box) return;
+    // Nothing to show when this signer is the only one.
+    box.hidden = coSigners.length < 2;
+    box.replaceChildren(
+      ...coSigners.map((c) => {
+        const chip = document.createElement('span');
+        chip.className = `co-chip${c.signed ? ' done' : ''}${c.me ? ' me' : ''}`;
+        const dot = document.createElement('span');
+        dot.className = 'co-dot';
+        dot.textContent = c.signed ? '✓' : '';
+        chip.appendChild(dot);
+        const name = document.createElement('span');
+        name.className = 'co-name';
+        name.textContent = c.me ? `${c.name} (${t.coYou})` : c.name;
+        chip.appendChild(name);
+        const st = document.createElement('span');
+        st.className = 'co-st';
+        st.textContent = c.signed ? t.coSigned : t.coPending;
+        chip.appendChild(st);
+        return chip;
+      })
+    );
+  }
+
+  /** Picks up signatures added by others while this page is open. */
+  function startPolling() {
+    if (pollTimer || coSigners.length < 2) return;
+    pollTimer = window.setInterval(async () => {
+      if (document.hidden || busy || !coSigners.some((c) => !c.me && !c.signed)) return;
+      try {
+        const data = await api<FieldsResponse>(`${base}/fields`);
+        // Same order every time (by signing position).
+        const fresh = (data.signers || []).filter((c, i) => c.signed && !c.me && !coSigners[i]?.signed);
+        coSigners = data.signers || coSigners;
+        others = data.others || others;
+        paintCoSigners();
+        if (fresh.length) {
+          paintFields();
+          for (const c of fresh) toast(fillIn(t.coJustSigned, { name: c.name }));
+        }
+      } catch {
+        // The link may have been revoked or the page left open too long; stop quietly.
+        window.clearInterval(pollTimer);
+      }
+    }, POLL_MS);
+  }
 
   function paintFields() {
     for (const p of pages) {
       p.layer.replaceChildren(
+        ...others.filter((o) => o.page === p.num).map(otherEl),
         ...fields
           .map((f, i) => ({ f, i }))
           .filter(({ f }) => f.page === p.num)
@@ -157,7 +268,7 @@ async function main(cfg: { token: string; step: string; signerName: string; init
             el.id = `fld-${f.id}`;
             el.className = `sfld${f.val ? ' filled' : ''}${i === active && !f.val ? ' active' : ''}`;
             el.style.cssText = `left:${f.x * 100}%;top:${f.y * 100}%;width:${f.w * 100}%;height:${f.h * 100}%`;
-            const label = f.type === 'sig' ? t.fSig : f.type === 'initial' ? t.fInitial : f.type === 'date' ? t.fDate : t.fName;
+            const label = fieldName(f.type);
             el.setAttribute('aria-label', label);
             if (f.val && isImg(f)) {
               const img = document.createElement('img');
@@ -190,8 +301,7 @@ async function main(cfg: { token: string; step: string; signerName: string; init
     const done = fields.filter((f) => f.val).length;
     const all = done === total;
     const af = fields[active];
-    const name = (f: SField) => (f.type === 'sig' ? t.fSig : f.type === 'initial' ? t.fInitial : f.type === 'date' ? t.fDate : t.fName);
-    $('sb-label').textContent = all ? t.allDone : `${t.fieldOf} ${Math.max(active, 0) + 1} ${t.of} ${total} · ${af ? name(af) : ''}`;
+    $('sb-label').textContent = all ? t.allDone : `${t.fieldOf} ${Math.max(active, 0) + 1} ${t.of} ${total} · ${af ? fieldName(af.type) : ''}`;
     $('sb-fill').style.width = `${total ? Math.round((done / total) * 100) : 100}%`;
     const btn = $<HTMLButtonElement>('sb-action');
     btn.textContent = busy ? t.submitting : all ? t.finish : af && isImg(af) ? t.tapToSign : t.tapToFill;
@@ -244,6 +354,7 @@ async function main(cfg: { token: string; step: string; signerName: string; init
       const images: Record<string, string> = {};
       for (const f of fields) if (isImg(f) && f.val) images[f.id] = f.val;
       await api(`${base}/submit`, { method: 'POST', json: { images } });
+      window.clearInterval(pollTimer);
       location.reload();
     } catch (e) {
       busy = false;

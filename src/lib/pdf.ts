@@ -393,7 +393,7 @@ async function appendCertificate(pdf: PDFDocument, fonts: Fonts, c: CertificateI
   text(t.certSigners, M, y - 12, 12, bold);
   y -= 22;
   for (const s of c.signers) {
-    const rowH = 74;
+    const rowH = 66;
     ensure(rowH);
     const top = y;
     page.drawCircle({ x: M + 10, y: top - 22, size: 10, color: MINT });
@@ -421,7 +421,6 @@ async function appendCertificate(pdf: PDFDocument, fonts: Fonts, c: CertificateI
       [t.signedAt, fmt(s.signed_at)],
       // Sarabun has no ✓ glyph.
       [t.identity, s.otp_verified_at ? `${t.otpVerified.replace('✓', '').trim()} · ${formatDate(s.otp_verified_at, lang, { time: true })}` : '—'],
-      ['IP', s.ip || '—'],
       [t.device, describeUserAgent(s.user_agent)],
     ];
     rows.forEach(([k, v], i) => {
@@ -430,32 +429,6 @@ async function appendCertificate(pdf: PDFDocument, fonts: Fonts, c: CertificateI
     });
     y = top - rowH;
     page.drawLine({ start: { x: M, y: y + 6 }, end: { x: M + W, y: y + 6 }, thickness: 0.6, color: LINE });
-  }
-  y -= 10;
-
-  // Audit trail.
-  ensure(40);
-  text(t.audit, M, y - 12, 12, bold);
-  y -= 26;
-  const cx = [M, M + 120, M + 320, M + 430];
-  const head = () => {
-    [t.certTime, t.certEvent, t.certBy, 'IP'].forEach((h, i) => text(h, cx[i], y, 7.5, bold, MUTED));
-    y -= 12;
-  };
-  head();
-  for (const ev of c.events) {
-    const evLabel = fill((t as Record<string, string>)[`ev_${ev.type}`] || ev.type, { name: ev.detail || '' });
-    const lines = wrapText(evLabel, regular, 7.8, 192);
-    const h = Math.max(lines.length, 1) * 10.5 + 4;
-    if (y - h < M + 28) {
-      ensure(h + 40);
-      head();
-    }
-    text(formatDate(ev.at, lang, { time: true, seconds: true }), cx[0], y - 1, 7, mono);
-    lines.forEach((l, i) => text(l, cx[1], y - 1 - i * 10.5, 7.8, regular));
-    text(wrapText(actorLabel(ev.actor_name, lang), regular, 7.8, 104)[0], cx[2], y - 1, 7.8, regular);
-    text(ev.ip || '—', cx[3], y - 1, 7, mono);
-    y -= h;
   }
   y -= 10;
 

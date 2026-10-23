@@ -61,10 +61,21 @@ describe('buildSignedPdf', () => {
       { doc, signers, events, signatures: new Map([[0, PNG]]), senderName: 'ณัฐพล วงศ์ใหญ่', orgName: 'Pulse Legal', verifyUrl: 'https://sign.pulselegal.co/verify' }
     );
     const result = await PDFDocument.load(out);
-    // 2 original pages + a certificate long enough to need 2 pages.
-    expect(result.getPageCount()).toBeGreaterThanOrEqual(4);
+    // 2 original pages + a one-page certificate: the audit trail (40 events
+    // here) is shown on /verify, not printed.
+    expect(result.getPageCount()).toBe(3);
     expect(result.getPage(1).getRotation().angle).toBe(90);
     if (process.env.PDF_OUT) writeFileSync(process.env.PDF_OUT, out);
+  });
+});
+
+describe('certificate pagination', () => {
+  it('flows many signers onto further pages', async () => {
+    const signers = Array.from({ length: 14 }, (_, i) => signer(i, `ผู้ลงนาม ${i + 1}`, `s${i}@example.com`));
+    const out = await buildSignedPdf(await samplePdf(), [], {
+      doc, signers, events: [], signatures: new Map(), senderName: 'A', orgName: 'Pulse Legal', verifyUrl: 'https://sign.pulselegal.co/verify',
+    });
+    expect((await PDFDocument.load(out)).getPageCount()).toBeGreaterThanOrEqual(4);
   });
 });
 

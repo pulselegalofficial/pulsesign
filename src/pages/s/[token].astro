@@ -210,6 +210,7 @@ const clientConfig = ctx
               </div>
               <button class="link-btn small decline-link" type="button" data-decline>{t.decline}</button>
             </div>
+            <div class="co-signers" id="co-signers" hidden />
             <div class="pdf-pages" id="sign-pages"><div class="pdf-loading">{t.loadingPdf}</div></div>
           </section>
         </>
@@ -553,6 +554,91 @@ const clientConfig = ctx
     font-size: clamp(9px, 1.4cqw, 13px);
     border: 2px dashed #ffb27a;
     background: #fff6ee;
+  }
+  .co-signers {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 0 0 14px;
+  }
+  :global(.co-chip) {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px 6px 6px;
+    border-radius: 999px;
+    border: 1px solid var(--mint-line);
+    background: #fff;
+    font-size: 13px;
+    max-width: 100%;
+  }
+  :global(.co-chip.me) {
+    border-color: #ffb27a;
+  }
+  :global(.co-dot) {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: 1.5px dashed #a9cdb8;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    flex: none;
+  }
+  :global(.co-chip.done .co-dot) {
+    border: none;
+    background: var(--forest);
+    color: #fff;
+  }
+  :global(.co-name) {
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  :global(.co-st) {
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  :global(.co-chip.done .co-st) {
+    color: var(--forest);
+  }
+  :global(.ofld) {
+    position: absolute;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    background: rgba(220, 240, 228, 0.35);
+    pointer-events: auto;
+    cursor: default;
+  }
+  :global(.ofld img) {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+  }
+  :global(.ofld .txt) {
+    color: var(--ink);
+    font-size: clamp(8px, 1.6cqw, 15px);
+    white-space: nowrap;
+  }
+  :global(.ofld .otag) {
+    position: absolute;
+    left: 0;
+    bottom: -15px;
+    font-size: 10px;
+    line-height: 1;
+    color: var(--forest);
+    background: rgba(255, 255, 255, 0.85);
+    padding: 1px 4px;
+    border-radius: 4px;
+    white-space: nowrap;
+    max-width: 160%;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   :global(.sfld.active) {
     border: 2px solid var(--pulse);
