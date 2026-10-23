@@ -307,7 +307,7 @@ const en = {
   certEvent: 'Event',
   certBy: 'By',
   certLegal:
-    'This document was signed with electronic signatures under Section 9 of the Electronic Transactions Act B.E. 2544 (2001). Every signer verified their identity with a one-time code sent by email. The SHA-256 above identifies the original file. To check that a copy of this signed document is unaltered, and to see the full audit trail with IP addresses, upload it at {url}. Personal data is handled under the Personal Data Protection Act B.E. 2562 (2019).',
+    'This document was signed with electronic signatures through Pulse Sign. Every signer verified their identity with a one-time code sent by email. The SHA-256 above identifies the original file. To check that a copy of this signed document is unaltered, and to see the full audit trail with IP addresses, upload it at {url}.',
 
   // Emails
   emSignSubjectFallback: 'Please sign: {title}',
@@ -619,7 +619,7 @@ const th: Dict = {
   certEvent: 'เหตุการณ์',
   certBy: 'โดย',
   certLegal:
-    'เอกสารนี้ลงนามด้วยลายมือชื่ออิเล็กทรอนิกส์ตามมาตรา 9 แห่ง พ.ร.บ.ว่าด้วยธุรกรรมทางอิเล็กทรอนิกส์ พ.ศ. 2544 ผู้ลงนามทุกคนยืนยันตัวตนด้วยรหัส OTP ทางอีเมล ค่า SHA-256 ข้างต้นระบุไฟล์ต้นฉบับ หากต้องการตรวจสอบว่าสำเนาเอกสารที่ลงนามแล้วไม่ถูกแก้ไข และดูประวัติการดำเนินการทั้งหมดพร้อม IP อัปโหลดได้ที่ {url} ข้อมูลส่วนบุคคลจัดเก็บตาม พ.ร.บ.คุ้มครองข้อมูลส่วนบุคคล พ.ศ. 2562',
+    'เอกสารนี้ลงนามด้วยลายมือชื่ออิเล็กทรอนิกส์ผ่าน Pulse Sign ผู้ลงนามทุกคนยืนยันตัวตนด้วยรหัส OTP ทางอีเมล ค่า SHA-256 ข้างต้นระบุไฟล์ต้นฉบับ หากต้องการตรวจสอบว่าสำเนาเอกสารที่ลงนามแล้วไม่ถูกแก้ไข และดูประวัติการดำเนินการทั้งหมดพร้อม IP อัปโหลดได้ที่ {url}',
 
   emSignSubjectFallback: 'กรุณาลงนาม: {title}',
   emSignIntro: '{sender} จาก {org} ขอให้คุณเซ็นเอกสาร',
