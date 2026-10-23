@@ -16,7 +16,7 @@ APP_URL = "https://sign.pulselegal.co"
 ORG_NAME = "Pulse Legal"
 # Who may sign in to the staff dashboard. Comma separated. An entry starting
 # with "@" allows a whole domain, e.g. "@pulselegal.co".
-STAFF_EMAILS = "@pulselegal.co"
+STAFF_EMAILS = "@pulselegal.co, pulse.legal.official@gmail.com"
 EMAIL_FROM = "Pulse Sign <sign@pulselegal.co>"
 # "browser": the staff member's browser checks uploads and builds the final
 # signed PDF, so the Worker fits the Free plan (10 ms CPU per request).
