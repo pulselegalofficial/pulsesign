@@ -1,4 +1,4 @@
-import { ApiError, api, fill, h, isEmail, strings, toast } from './ui';
+import { ApiError, api, fill, h, isEmail, pageLang, strings, toast } from './ui';
 import { renderPdf, type RenderedPage } from './pdfview';
 import { UploadCheckError, inspectUpload, uploadInit } from './pdfwork';
 
@@ -13,9 +13,12 @@ interface Field {
   w: number;
   h: number;
 }
+type Lang = 'th' | 'en';
 interface Signer {
   name: string;
   email: string;
+  /** Language of this signer's emails and signing page. */
+  lang: Lang;
 }
 interface DocData {
   id: string;
@@ -104,7 +107,9 @@ function saveNow(): Promise<void> {
 async function load(id: string) {
   const data = await api<{ doc: DocData; signers: Signer[]; fields: Omit<Field, 'id'>[] }>(`/api/docs/${id}`);
   state.doc = data.doc;
-  state.signers = data.signers.length ? data.signers : [{ name: '', email: '' }];
+  state.signers = data.signers.length
+    ? data.signers.map((s) => ({ ...s, lang: s.lang === 'en' ? 'en' : s.lang === 'th' ? 'th' : pageLang() }))
+    : [{ name: '', email: '', lang: pageLang() }];
   state.fields = data.fields.map((f) => ({ ...f, id: uid() }));
   if (!state.doc.subject) state.doc.subject = fill(t.defSubject, { title: state.doc.title });
   if (!state.doc.message) state.doc.message = t.defMsg;
@@ -206,6 +211,7 @@ function renderSigners() {
         h('span', { class: 'num-dot', style: `background:${color(i).dot}` }, seq ? String(i + 1) : '•'),
         h('div', { class: 'field f-name' }, h('label', { text: t.fullName }), name),
         h('div', { class: 'field f-email' }, h('label', { text: t.email }), email),
+        h('div', { class: 'field f-lang' }, h('label', { text: t.emailLang }), langToggle(s)),
         h('div', { class: 'ctl' }, up, down, rm)
       );
     })
@@ -219,6 +225,19 @@ function renderSigners() {
   }
   $<HTMLButtonElement>('add-me').disabled = state.signers.some((s) => s.email.trim().toLowerCase() === config.me.email);
   $<HTMLButtonElement>('add-signer').disabled = state.signers.length >= 10;
+}
+
+function langToggle(s: Signer) {
+  const wrap = h('span', { class: 'seg', role: 'group', 'aria-label': t.emailLang });
+  for (const l of ['th', 'en'] as Lang[]) {
+    const b = h('button', { type: 'button', class: s.lang === l ? 'on' : '', 'aria-pressed': s.lang === l ? 'true' : 'false' }, l.toUpperCase());
+    b.addEventListener('click', () => {
+      s.lang = l;
+      changed();
+    });
+    wrap.appendChild(b);
+  }
+  return wrap;
 }
 
 function move(i: number, d: number) {
@@ -410,6 +429,7 @@ function renderReview() {
         { class: 'sum-signer' },
         h('span', { class: 'num-dot', style: `background:${color(i).dot}` }, d.sequential ? String(i + 1) : '•'),
         h('div', { class: 'who' }, h('strong', { text: s.name }), h('span', { class: 'small muted', text: s.email })),
+        h('span', { class: 'tag', title: t.emailLang, text: s.lang.toUpperCase() }),
         h('span', { class: 'small muted', text: `${n} ${t.fieldsUnit}` })
       );
     })
@@ -544,14 +564,14 @@ function wire() {
     changed();
   });
   $('add-signer').addEventListener('click', () => {
-    state.signers.push({ name: '', email: '' });
+    state.signers.push({ name: '', email: '', lang: pageLang() });
     changed();
     const rows = document.querySelectorAll<HTMLInputElement>('#signer-rows .f-name input');
     rows[rows.length - 1]?.focus();
   });
   $('add-me').addEventListener('click', () => {
     const empty = state.signers.findIndex((s) => !s.name.trim() && !s.email.trim());
-    const me = { name: config.me.name, email: config.me.email };
+    const me: Signer = { name: config.me.name, email: config.me.email, lang: pageLang() };
     if (empty >= 0) state.signers[empty] = me;
     else state.signers.push(me);
     changed();

@@ -1,5 +1,5 @@
 import type { APIRoute } from 'astro';
-import { DocError, deleteDraft, getDoc, getFields, getSigners, saveDraft, type DraftInput } from '../../../../lib/docs';
+import { DocError, deleteDocument, getDoc, getFields, getSigners, saveDraft, type DraftInput } from '../../../../lib/docs';
 import { fail, json, notFound, readJson, unauthorized } from '../../../../lib/http';
 
 export const GET: APIRoute = async ({ params, locals }) => {
@@ -20,7 +20,7 @@ export const GET: APIRoute = async ({ params, locals }) => {
       message: doc.message,
       expiryDays: doc.expiry_days,
     },
-    signers: signers.map((s) => ({ name: s.name, email: s.email })),
+    signers: signers.map((s) => ({ name: s.name, email: s.email, lang: s.lang })),
     fields: fields.map((f) => ({ signer: f.signer_pos, type: f.type, page: f.page, x: f.x, y: f.y, w: f.w, h: f.h })),
   });
 };
@@ -40,12 +40,16 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
   }
 };
 
-export const DELETE: APIRoute = async ({ params, locals }) => {
+/**
+ * Permanently deletes a document and all its files. Anything other than a
+ * draft needs `?confirm=<document number>`.
+ */
+export const DELETE: APIRoute = async ({ params, locals, url }) => {
   if (!locals.user) return unauthorized();
   const doc = await getDoc(params.id!);
   if (!doc) return notFound();
   try {
-    await deleteDraft(doc);
+    await deleteDocument(doc, url.searchParams.get('confirm'));
     return json({ ok: true });
   } catch (e) {
     if (e instanceof DocError) return fail(e.code, e.status);

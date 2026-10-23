@@ -23,7 +23,7 @@ import sarabunRegularUrl from '../assets/fonts/Sarabun-Regular.ttf?inline';
 import sarabunSemiBoldUrl from '../assets/fonts/Sarabun-SemiBold.ttf?inline';
 import { fitContain, placeField, type Box } from './geometry';
 import { formatDate, describeUserAgent } from './format';
-import { dict, fill, type Lang } from './i18n';
+import { actorLabel, dict, fill, type Lang } from './i18n';
 import type { DocumentRow, EventRow, FieldRow, SignerRow } from './types';
 
 /** Thrown for uploads that are not usable PDFs; `code` is an i18n key. */
@@ -289,8 +289,10 @@ const A4: [number, number] = [595.28, 841.89];
 const M = 48;
 
 async function appendCertificate(pdf: PDFDocument, fonts: Fonts, c: CertificateInput) {
-  const lang = (c.doc.lang === 'en' ? 'en' : 'th') as Lang;
-  const other: Lang = lang === 'th' ? 'en' : 'th';
+  // Always English, whatever language the document was sent in, so the
+  // certificate reads the same for every party and any court or counterparty.
+  // Names and the document title stay as entered.
+  const lang: Lang = 'en';
   const t = dict(lang);
   const { regular, bold, mono } = fonts;
   const W = A4[0] - M * 2;
@@ -339,9 +341,7 @@ async function appendCertificate(pdf: PDFDocument, fonts: Fonts, c: CertificateI
   text('Pulse Sign', M + 40, y - 15, 15, bold, FOREST);
   text(new URL(c.verifyUrl).host, M + 40, y - 28, 8.5, regular, MUTED);
   const title = t.certTitle;
-  const sub = dict(other).certTitle;
-  text(title, M + W - bold.widthOfTextAtSize(title, 17), y - 16, 17, bold);
-  text(sub, M + W - regular.widthOfTextAtSize(sub, 9.5), y - 30, 9.5, regular, MUTED);
+  text(title, M + W - bold.widthOfTextAtSize(title, 18), y - 20, 18, bold);
   y -= 44;
   page.drawLine({ start: { x: M, y }, end: { x: M + W, y }, thickness: 1.5, color: FOREST });
   y -= 14;
@@ -453,7 +453,7 @@ async function appendCertificate(pdf: PDFDocument, fonts: Fonts, c: CertificateI
     }
     text(formatDate(ev.at, lang, { time: true, seconds: true }), cx[0], y - 1, 7, mono);
     lines.forEach((l, i) => text(l, cx[1], y - 1 - i * 10.5, 7.8, regular));
-    text(wrapText(ev.actor_name, regular, 7.8, 104)[0], cx[2], y - 1, 7.8, regular);
+    text(wrapText(actorLabel(ev.actor_name, lang), regular, 7.8, 104)[0], cx[2], y - 1, 7.8, regular);
     text(ev.ip || '—', cx[3], y - 1, 7, mono);
     y -= h;
   }

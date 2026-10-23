@@ -2,17 +2,21 @@
 import Base from '../../layouts/Base.astro';
 import Logo from '../../components/Logo.astro';
 import LangToggle from '../../components/LangToggle.astro';
-import { dict, fill } from '../../lib/i18n';
+import { dict, fill, isLang } from '../../lib/i18n';
 import { ACTIVE, getSigners, getUser } from '../../lib/docs';
 import { resolveSigner } from '../../lib/signer-session';
 import { displayName } from '../../lib/auth';
 import { orgName } from '../../lib/env';
 import { describeUserAgent, formatDate, initials } from '../../lib/format';
 
-const lang = Astro.locals.lang;
-const t = dict(lang);
 const token = Astro.params.token!;
 const ctx = await resolveSigner(Astro.request, token);
+// The signer's language, as the sender chose it, unless they have switched
+// with the TH/EN toggle (which sets the lang cookie).
+const chosen = /(?:^|;\s*)lang=(th|en)\b/.test(Astro.request.headers.get('cookie') || '');
+if (ctx && !chosen && isLang(ctx.signer.lang)) Astro.locals.lang = ctx.signer.lang;
+const lang = Astro.locals.lang;
+const t = dict(lang);
 const org = orgName();
 const reasons = [t.r1, t.r2, t.r3];
 
