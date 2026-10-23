@@ -1,0 +1,346 @@
+---
+import App from '../layouts/App.astro';
+import StatusChip from '../components/StatusChip.astro';
+import { dict } from '../lib/i18n';
+import { listDocs } from '../lib/docs';
+import { formatDate } from '../lib/format';
+import type { DocStatus } from '../lib/types';
+
+const lang = Astro.locals.lang;
+const t = dict(lang);
+const docs = await listDocs();
+const STATUSES: DocStatus[] = ['draft', 'sent', 'opened', 'completed', 'declined', 'cancelled', 'expired'];
+const counts = Object.fromEntries(STATUSES.map((s) => [s, docs.filter((d) => d.status === s).length]));
+const tabs = [{ key: 'all', label: t.all, count: docs.length }, ...STATUSES.filter((s) => counts[s] > 0 || ['draft', 'sent', 'opened', 'completed'].includes(s)).map((s) => ({ key: s, label: (t as Record<string, string>)[`st_${s}`], count: counts[s] }))];
+// Completed documents whose final PDF has not been built yet (PDF_MODE=browser).
+const pendingFinal = docs.filter((d) => d.status === 'completed' && !d.final_key).map((d) => d.id);
+const rows = docs.map((d) => {
+  const signed = d.signers.filter((s) => s.status === 'signed').length;
+  const first = d.signers[0];
+  return {
+    ...d,
+    href: d.status === 'draft' ? `/new?id=${d.id}` : `/docs/${d.id}`,
+    who: first ? first.name + (d.signers.length > 1 ? ` +${d.signers.length - 1}` : '') : '—',
+    prog: `${signed}/${d.signers.length} ${t.signedOf}`,
+    updated: formatDate(d.updated_at, lang, { time: true }),
+    updatedShort: formatDate(d.updated_at, lang),
+    canRemind: d.status === 'sent' || d.status === 'opened',
+    search: `${d.title} ${d.id} ${d.signers.map((s) => s.name + ' ' + s.email).join(' ')}`.toLowerCase(),
+  };
+});
+---
+<App title={t.dashTitle} clientStrings>
+  <div class="head">
+    <h1>{t.dashTitle}</h1>
+    <a class="btn btn-pulse mobile-new" href="/new">+ {t.newDoc}</a>
+  </div>
+  {
+    pendingFinal.length > 0 && (
+      <div class="card finalizing" id="finalizing">
+        <span class="spinner" />
+        <span>{t.finalizingMany}</span>
+      </div>
+    )
+  }
+  <script type="application/json" id="pending-final" set:html={JSON.stringify(pendingFinal)} />
+  <input class="input input-pill search" id="q" type="search" placeholder={t.search} autocomplete="off" />
+  <div class="tabs" role="tablist">
+    {
+      tabs.map((tab, i) => (
+        <button type="button" class:list={['tab', { on: i === 0 }]} data-tab={tab.key} role="tab" aria-selected={i === 0 ? 'true' : 'false'}>
+          {tab.label} <span class="count">{tab.count}</span>
+        </button>
+      ))
+    }
+  </div>
+
+  {
+    docs.length === 0 ? (
+      <div class="card empty-all">
+        <p>{t.emptyAll}</p>
+        <a class="btn btn-pulse" href="/new">+ {t.newDoc}</a>
+      </div>
+    ) : (
+      <div class="card list">
+        <div class="row header">
+          <span>{t.colDoc}</span>
+          <span>{t.colStatus}</span>
+          <span>{t.colSigners}</span>
+          <span>{t.colUpdated}</span>
+          <span />
+        </div>
+        {rows.map((d) => (
+          <div class="row doc" data-status={d.status} data-search={d.search}>
+            <span class="title-cell">
+              <a class="stretched" href={d.href}>{d.title}</a>
+              <span class="mono faint small">{d.id}</span>
+            </span>
+            <span class="status-cell">
+              <StatusChip status={d.status} />
+            </span>
+            <span class="who-cell">
+              <span>{d.who}</span>
+              <span class="faint small">{d.prog}</span>
+            </span>
+            <span class="date-cell small muted">
+              <span class="long">{d.updated}</span>
+              <span class="short">{d.prog} · {d.updatedShort}</span>
+            </span>
+            <span class="act-cell">{d.canRemind && <button type="button" class="btn btn-soft btn-sm" data-remind={d.id}>{t.resend}</button>}</span>
+          </div>
+        ))}
+        <p class="empty faint" id="empty" hidden>{t.empty}</p>
+      </div>
+    )
+  }
+  <div class="toast" id="toast" hidden></div>
+</App>
+
+<script>
+  import { strings, toast } from '../scripts/ui';
+  const t = strings();
+  const pending: string[] = JSON.parse(document.getElementById('pending-final')!.textContent || '[]');
+  if (pending.length) {
+    void (async () => {
+      const { finalizeDocument } = await import('../scripts/pdfwork');
+      let failed = false;
+      for (const id of pending) {
+        try {
+          await finalizeDocument(id);
+        } catch (e) {
+          console.error(e);
+          failed = true;
+        }
+      }
+      if (failed) {
+        document.getElementById('finalizing')!.textContent = t.finalizeFailed;
+        return;
+      }
+      location.reload();
+    })();
+  }
+  let filter = 'all';
+  const q = document.getElementById('q') as HTMLInputElement;
+  const rows = [...document.querySelectorAll<HTMLElement>('.row.doc')];
+  function apply() {
+    const term = q.value.trim().toLowerCase();
+    let shown = 0;
+    for (const r of rows) {
+      const ok = (filter === 'all' || r.dataset.status === filter) && (!term || r.dataset.search!.includes(term));
+      r.hidden = !ok;
+      if (ok) shown++;
+    }
+    const empty = document.getElementById('empty');
+    if (empty) empty.hidden = shown > 0;
+  }
+  q.addEventListener('input', apply);
+  document.querySelectorAll<HTMLButtonElement>('.tab').forEach((b) =>
+    b.addEventListener('click', () => {
+      filter = b.dataset.tab!;
+      document.querySelectorAll('.tab').forEach((x) => {
+        x.classList.toggle('on', x === b);
+        x.setAttribute('aria-selected', String(x === b));
+      });
+      apply();
+    })
+  );
+  document.querySelectorAll<HTMLButtonElement>('[data-remind]').forEach((b) =>
+    b.addEventListener('click', async (e) => {
+      b.disabled = true;
+      const res = await fetch(`/api/docs/${b.dataset.remind}/remind`, { method: 'POST' });
+      toast(res.ok ? t.resentToast : t.errGeneric, !res.ok);
+      b.disabled = false;
+    })
+  );
+</script>
+
+<style>
+  .finalizing {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 18px;
+    background: var(--peach-2);
+    border: 1.5px solid var(--peach);
+    font-weight: 600;
+  }
+  .spinner {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: 3px solid var(--peach);
+    border-top-color: var(--pulse);
+    animation: spin 0.8s linear infinite;
+    flex: none;
+  }
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  .head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 22px;
+  }
+  .mobile-new {
+    display: none;
+  }
+  .search {
+    max-width: 460px;
+    background: #fff;
+    border-color: #fff;
+  }
+  .tabs {
+    display: flex;
+    gap: 8px;
+    margin: 18px 0 20px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding-bottom: 2px;
+  }
+  .tab {
+    border: 0;
+    background: #fff;
+    color: var(--ink-2);
+    font-weight: 600;
+    font-size: 14px;
+    padding: 9px 15px;
+    border-radius: 999px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .tab .count {
+    font-size: 12px;
+    opacity: 0.7;
+    margin-left: 4px;
+  }
+  .tab.on {
+    background: var(--forest);
+    color: #fff;
+  }
+  .list {
+    padding: 0;
+    overflow: hidden;
+  }
+  .row {
+    display: grid;
+    grid-template-columns: minmax(0, 2.2fr) 140px minmax(0, 1.2fr) 170px 120px;
+    gap: 16px;
+    align-items: center;
+    padding: 16px 22px;
+    border-top: 1px solid var(--mint-line);
+    color: inherit;
+    text-decoration: none;
+  }
+  .row.header {
+    border-top: 0;
+    font-size: 13px;
+    color: var(--muted);
+    font-weight: 600;
+    padding-top: 18px;
+    padding-bottom: 14px;
+  }
+  .row.doc:hover {
+    background: var(--mint-3);
+    color: inherit;
+  }
+  .title-cell,
+  .who-cell {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .row.doc {
+    position: relative;
+  }
+  .stretched {
+    color: inherit;
+    text-decoration: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+  }
+  .stretched::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+  }
+  .act-cell .btn {
+    position: relative;
+    z-index: 1;
+  }
+  .who-cell span:first-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .date-cell .short {
+    display: none;
+  }
+  .act-cell {
+    text-align: right;
+  }
+  .empty,
+  .empty-all {
+    text-align: center;
+    padding: 40px 20px;
+  }
+  .empty-all p {
+    color: var(--muted);
+    margin: 0 0 18px;
+  }
+  @media (max-width: 900px) {
+    .mobile-new {
+      display: inline-flex;
+    }
+    .list {
+      background: none;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .row.header {
+      display: none;
+    }
+    .row.doc {
+      background: #fff;
+      border-radius: 20px;
+      border: 0;
+      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-areas: 'title status' 'date act';
+      gap: 10px;
+      padding: 16px;
+    }
+    .row.doc[hidden] {
+      display: none;
+    }
+    .title-cell {
+      grid-area: title;
+    }
+    .stretched {
+      white-space: normal;
+    }
+    .status-cell {
+      grid-area: status;
+      align-self: start;
+    }
+    .who-cell {
+      display: none;
+    }
+    .date-cell {
+      grid-area: date;
+    }
+    .date-cell .long {
+      display: none;
+    }
+    .date-cell .short {
+      display: inline;
+    }
+    .act-cell {
+      grid-area: act;
+    }
+  }
+</style>

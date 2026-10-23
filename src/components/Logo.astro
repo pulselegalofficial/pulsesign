@@ -1,0 +1,17 @@
+---
+interface Props {
+  size?: number;
+  href?: string;
+  label?: boolean;
+}
+const { size = 34, href, label = true } = Astro.props;
+const Tag = href ? 'a' : 'span';
+---
+<Tag class="logo" href={href}>
+  <span class="logo-mark" style={`width:${size}px;height:${size}px`}>
+    <svg width={Math.round(size * 0.62)} height={Math.round(size * 0.62)} viewBox="0 0 40 40" aria-hidden="true">
+      <polyline points="3,22 14,22 18,8 25,32 29,22 37,22" fill="none" stroke="#FF7A12" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"></polyline>
+    </svg>
+  </span>
+  {label && <span>Pulse Sign</span>}
+</Tag>

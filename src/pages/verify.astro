@@ -1,0 +1,253 @@
+---
+import App from '../layouts/App.astro';
+import Base from '../layouts/Base.astro';
+import Logo from '../components/Logo.astro';
+import LangToggle from '../components/LangToggle.astro';
+import { dict } from '../lib/i18n';
+const t = dict(Astro.locals.lang);
+const Layout = Astro.locals.user ? App : Base;
+const props = Astro.locals.user ? { title: t.verifyTitle, active: 'verify' as const, clientStrings: true } : { title: t.verifyTitle, clientStrings: true };
+const isPublic = !Astro.locals.user;
+---
+<Layout {...props}>
+  {
+    isPublic && (
+      <header class="pub-head">
+        <Logo />
+        <LangToggle />
+      </header>
+    )
+  }
+  <div class:list={['verify', { pub: isPublic }]}>
+    <h1>{t.verifyTitle}</h1>
+    <p class="muted sub">{t.verifySub}</p>
+
+    <label class="card drop" id="v-drop">
+      <input type="file" accept="application/pdf,.pdf" id="v-file" class="sr-only" />
+      <span class="sha">SHA</span>
+      <strong class="drop-title">{t.verifyDrop}</strong>
+      <span class="btn">{t.chooseFile}</span>
+    </label>
+
+    <div class="card busy" id="v-busy" hidden>
+      <span class="spinner"></span>
+      <span>{t.checking}</span>
+    </div>
+
+    <div class="card result" id="v-result" hidden>
+      <div class="res-head">
+        <span class="res-icon" id="v-icon"></span>
+        <div>
+          <h2 id="v-title"></h2>
+          <p class="muted" id="v-sub"></p>
+        </div>
+      </div>
+      <span class="label">{t.fileHash} · <span id="v-name"></span></span>
+      <div class="hash" id="v-hash"></div>
+      <dl class="facts" id="v-facts" hidden>
+        <div><dt>{t.colDoc}</dt><dd id="v-doc"></dd></div>
+        <div><dt>{t.docId}</dt><dd class="mono" id="v-id"></dd></div>
+        <div><dt>{t.completedAt}</dt><dd id="v-done"></dd></div>
+        <div><dt>{t.colSigners}</dt><dd id="v-signers"></dd></div>
+      </dl>
+      <button class="btn btn-soft" type="button" id="v-again">{t.verifyAnother}</button>
+    </div>
+
+    <p class="small muted privacy">{t.verifyPrivacy}</p>
+  </div>
+</Layout>
+
+<script>
+  import { strings, pageLang } from '../scripts/ui';
+  const t = strings();
+  const lang = pageLang();
+  const $ = (id: string) => document.getElementById(id)!;
+  const MTH_TH = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+  const MTH_EN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  function fmt(ts: number) {
+    const d = new Date(ts + 7 * 3600 * 1000);
+    const p = (n: number) => String(n).padStart(2, '0');
+    const date = lang === 'th' ? `${d.getUTCDate()} ${MTH_TH[d.getUTCMonth()]} ${d.getUTCFullYear() + 543}` : `${d.getUTCDate()} ${MTH_EN[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+    return `${date} · ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
+  }
+  async function check(file: File) {
+    $('v-drop').hidden = true;
+    $('v-busy').hidden = false;
+    $('v-result').hidden = true;
+    const buf = await file.arrayBuffer();
+    const digest = await crypto.subtle.digest('SHA-256', buf);
+    const hex = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+    let data: { match: boolean; doc?: { id: string; title: string; completedAt: number; signers: string[] } } = { match: false };
+    try {
+      data = await (await fetch(`/api/verify?hash=${hex}`)).json();
+    } catch {
+      /* treated as no match */
+    }
+    $('v-busy').hidden = true;
+    $('v-result').hidden = false;
+    $('v-name').textContent = file.name;
+    $('v-hash').textContent = hex;
+    const icon = $('v-icon');
+    icon.textContent = data.match ? '✓' : '!';
+    icon.className = `res-icon ${data.match ? 'ok' : 'bad'}`;
+    $('v-title').textContent = data.match ? t.match : t.noMatch;
+    $('v-sub').textContent = data.match ? t.matchSub : t.noMatchSub;
+    $('v-facts').hidden = !data.match;
+    if (data.match && data.doc) {
+      $('v-doc').textContent = data.doc.title;
+      $('v-id').textContent = data.doc.id;
+      $('v-done').textContent = fmt(data.doc.completedAt);
+      $('v-signers').textContent = data.doc.signers.join(', ');
+    }
+  }
+  const input = $('v-file') as HTMLInputElement;
+  input.addEventListener('change', () => input.files?.[0] && check(input.files[0]));
+  const drop = $('v-drop');
+  drop.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    drop.classList.add('over');
+  });
+  drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+  drop.addEventListener('drop', (e) => {
+    e.preventDefault();
+    drop.classList.remove('over');
+    const f = e.dataTransfer?.files?.[0];
+    if (f) check(f);
+  });
+  $('v-again').addEventListener('click', () => {
+    input.value = '';
+    $('v-result').hidden = true;
+    $('v-drop').hidden = false;
+  });
+</script>
+
+<style>
+  .pub-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--mint-line);
+  }
+  .verify {
+    max-width: 700px;
+  }
+  .verify.pub {
+    margin: 0 auto;
+    padding: 36px 16px 60px;
+  }
+  .sub {
+    margin: 8px 0 22px;
+  }
+  .drop {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    padding: 48px 20px;
+    border: 2px dashed #a9cdb8;
+    cursor: pointer;
+    text-align: center;
+  }
+  .drop.over {
+    border-color: var(--forest);
+    background: var(--mint-3);
+  }
+  .sha {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    background: var(--mint);
+    color: var(--forest);
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .drop-title {
+    font-family: var(--font-head);
+    font-size: 19px;
+  }
+  .busy {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    justify-content: center;
+    padding: 40px;
+  }
+  .spinner {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: 3px solid var(--mint);
+    border-top-color: var(--forest);
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  .result {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    align-items: flex-start;
+  }
+  .result .hash {
+    width: 100%;
+  }
+  .res-head {
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+  .res-head p {
+    margin: 4px 0 0;
+  }
+  .res-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 22px;
+    flex: none;
+  }
+  .res-icon.ok {
+    background: var(--forest);
+    color: #fff;
+  }
+  .res-icon.bad {
+    background: var(--danger-bg);
+    color: var(--danger);
+  }
+  .facts {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    width: 100%;
+    margin: 6px 0 8px;
+  }
+  .facts dt {
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .facts dd {
+    margin: 2px 0 0;
+    font-weight: 600;
+  }
+  .privacy {
+    margin-top: 18px;
+  }
+  @media (max-width: 600px) {
+    .facts {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

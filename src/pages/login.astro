@@ -1,0 +1,175 @@
+---
+import Base from '../layouts/Base.astro';
+import Logo from '../components/Logo.astro';
+import LangToggle from '../components/LangToggle.astro';
+import { dict } from '../lib/i18n';
+if (Astro.locals.user) return Astro.redirect('/');
+const t = dict(Astro.locals.lang);
+const next = Astro.url.searchParams.get('next') || '';
+---
+<Base title={t.loginTitle}>
+  <div class="login">
+    <section class="hero">
+      <Logo />
+      <div>
+        <h1>{t.loginHero}</h1>
+        <p>{t.loginHeroSub}</p>
+      </div>
+    </section>
+    <section class="panel">
+      <div class="box">
+        <div class="box-head">
+          <span class="mobile-logo"><Logo size={30} /></span>
+          <LangToggle />
+        </div>
+        <form id="login-form" novalidate>
+          <h2 class="title">{t.loginTitle}</h2>
+          <p class="muted">{t.loginSub}</p>
+          <div class="field" style="margin-top:26px">
+            <label for="email">{t.emailLabel}</label>
+            <input class="input input-pill" id="email" name="email" type="email" autocomplete="email" required placeholder="you@pulselegal.co" />
+          </div>
+          <input type="hidden" name="next" value={next} />
+          <button class="btn btn-block btn-lg" style="margin-top:14px" type="submit" id="login-btn">{t.magicBtn}</button>
+          <p class="error small" id="login-error" hidden></p>
+          <p class="small faint" style="margin-top:26px">{t.terms}</p>
+        </form>
+        <div id="sent" hidden>
+          <div class="sent-icon">@</div>
+          <h2 class="title">{t.magicSentTitle}</h2>
+          <p class="muted">{t.magicSentBody} <strong id="sent-email" style="color:var(--ink)"></strong></p>
+          <p class="small faint">{t.magicSentNote}</p>
+          <button class="btn btn-soft" type="button" id="use-other" style="margin-top:12px">{t.useOther}</button>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script type="application/json" id="login-strings" set:html={JSON.stringify({ err: t.errGeneric })} />
+</Base>
+
+<script>
+  const form = document.getElementById('login-form') as HTMLFormElement;
+  const sent = document.getElementById('sent')!;
+  const err = document.getElementById('login-error')!;
+  const strings = JSON.parse(document.getElementById('login-strings')!.textContent!);
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const email = (form.elements.namedItem('email') as HTMLInputElement).value.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      (form.elements.namedItem('email') as HTMLInputElement).classList.add('invalid');
+      return;
+    }
+    const btn = document.getElementById('login-btn') as HTMLButtonElement;
+    btn.disabled = true;
+    err.hidden = true;
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email, next: (form.elements.namedItem('next') as HTMLInputElement).value }),
+      });
+      if (!res.ok) throw new Error();
+      document.getElementById('sent-email')!.textContent = email;
+      form.hidden = true;
+      sent.hidden = false;
+    } catch {
+      err.textContent = strings.err;
+      err.hidden = false;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+  document.getElementById('use-other')!.addEventListener('click', () => {
+    sent.hidden = true;
+    form.hidden = false;
+  });
+</script>
+
+<style>
+  .login {
+    min-height: 100vh;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  .hero {
+    background: var(--forest);
+    color: #fff;
+    padding: 56px;
+    display: flex;
+    flex-direction: column;
+    gap: 140px;
+  }
+  .hero :global(.logo) {
+    color: #fff;
+  }
+  .hero :global(.logo-mark) {
+    background: #eef5f0;
+  }
+  .hero h1 {
+    font-size: 40px;
+    max-width: 520px;
+    line-height: 1.35;
+  }
+  .hero p {
+    color: #cfe7d8;
+    max-width: 480px;
+    font-size: 17px;
+    line-height: 1.7;
+    margin-top: 20px;
+  }
+  .panel {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 24px;
+  }
+  .box {
+    width: 100%;
+    max-width: 400px;
+  }
+  .box-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 36px;
+  }
+  .mobile-logo {
+    visibility: hidden;
+  }
+  .title {
+    font-size: 30px;
+    margin-bottom: 6px;
+  }
+  .error {
+    color: var(--danger);
+    margin-top: 10px;
+  }
+  .sent-icon {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    background: var(--mint);
+    color: var(--forest);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 26px;
+    margin-bottom: 20px;
+  }
+  @media (max-width: 860px) {
+    .login {
+      grid-template-columns: 1fr;
+    }
+    .hero {
+      display: none;
+    }
+    .mobile-logo {
+      visibility: visible;
+    }
+    .panel {
+      align-items: flex-start;
+      padding-top: 28px;
+    }
+  }
+</style>

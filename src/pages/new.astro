@@ -1,0 +1,689 @@
+---
+import App from '../layouts/App.astro';
+import { dict } from '../lib/i18n';
+import { getDoc } from '../lib/docs';
+import { displayName } from '../lib/auth';
+import { orgName } from '../lib/env';
+
+const t = dict(Astro.locals.lang);
+const id = Astro.url.searchParams.get('id');
+if (id) {
+  const doc = await getDoc(id);
+  if (!doc) return Astro.redirect('/');
+  if (doc.status !== 'draft') return Astro.redirect(`/docs/${doc.id}`);
+}
+const user = Astro.locals.user!;
+const config = { id, me: { name: displayName(user), email: user.email }, org: orgName() };
+const steps = [t.ws1, t.ws2, t.ws3, t.ws4];
+---
+<App title={t.newDoc} clientStrings bottomNav={false}>
+  <script type="application/json" id="wizard-config" set:html={JSON.stringify(config).replace(/</g, '\\u003c')} />
+  <div class="wiz">
+    <a class="back-link" href="/">← {t.navDocs}</a>
+    <div class="steps" style="--n:4" id="steps">
+      {
+        steps.map((label, i) => (
+          <div class="step" data-step={i}>
+            <div class="bar" />
+            <button class="lbl" type="button">
+              <span class="dot">{i + 1}</span>
+              <span class="lbl-text">{label}</span>
+            </button>
+          </div>
+        ))
+      }
+    </div>
+    <div class="wiz-head">
+      <h1 id="wiz-title">{t.ws1}</h1>
+      <p class="muted" id="wiz-sub">{t.wsSub1}</p>
+    </div>
+
+    <!-- 1 Upload -->
+    <section data-pane="0">
+      <label class="drop card" id="drop" hidden>
+        <input type="file" accept="application/pdf,.pdf" id="file-input" class="sr-only" />
+        <span class="drop-icon">
+          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#00412F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M6 10l6-6 6 6M4 20h16"/></svg>
+        </span>
+        <strong class="drop-title">{t.uploadTitle}</strong>
+        <span class="muted small">{t.uploadSub}</span>
+        <span class="btn" id="choose-btn">{t.chooseFile}</span>
+        <span class="small" id="upload-msg" hidden></span>
+      </label>
+      <div class="card file-card" id="file-card" hidden>
+        <div class="file-row">
+          <span class="pdf-badge">PDF</span>
+          <div class="file-meta">
+            <span class="ok small">✓ {t.uploadedOk}</span>
+            <strong id="file-name"></strong>
+            <span class="muted small" id="file-info"></span>
+          </div>
+          <label class="btn btn-soft btn-sm">
+            <input type="file" accept="application/pdf,.pdf" id="replace-input" class="sr-only" />
+            {t.replace}
+          </label>
+        </div>
+        <div class="field" style="margin-top:18px">
+          <label for="doc-title">{t.docTitle}</label>
+          <input class="input" id="doc-title" maxlength="200" />
+        </div>
+        <button class="link-btn danger-link small" type="button" id="delete-draft">{t.deleteDraft}</button>
+      </div>
+    </section>
+
+    <!-- 2 Signers -->
+    <section data-pane="1" hidden>
+      <div class="card signers-card">
+        <div class="signers-head">
+          <div>
+            <h2 id="signer-count"></h2>
+            <p class="muted small" id="seq-sub"></p>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="seq" checked />
+            <span class="track"><span class="knob"></span></span>
+            <strong>{t.seqOrder}</strong>
+          </label>
+        </div>
+        <div id="signer-rows" class="signer-rows"></div>
+        <div class="signer-actions">
+          <button class="btn btn-soft btn-sm" type="button" id="add-signer">+ {t.addSigner}</button>
+          <button class="btn btn-ghost btn-sm" type="button" id="add-me">+ {t.addMe}</button>
+        </div>
+      </div>
+      <div class="note">
+        <span class="note-icon">@</span>
+        <span>{t.otpNote}</span>
+      </div>
+    </section>
+
+    <!-- 3 Place fields -->
+    <section data-pane="2" hidden>
+      <div class="place">
+        <div class="place-panel">
+          <div class="card how">
+            <div><span class="n">1</span>{t.placeHow1}</div>
+            <div><span class="n">2</span><span class="how2"></span></div>
+            <div><span class="n">3</span>{t.placeHow3}</div>
+          </div>
+          <div id="place-signers" class="place-signers"></div>
+        </div>
+        <div class="place-doc">
+          <div class="armed" id="armed" hidden>
+            <span class="armed-dot"></span>
+            <span id="armed-label"></span>
+            <button type="button" class="btn btn-sm btn-soft" id="disarm">{t.cancel}</button>
+          </div>
+          <div class="pdf-pages" id="pages"><div class="pdf-loading">{t.loadingPdf}</div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4 Review -->
+    <section data-pane="3" hidden>
+      <div class="review">
+        <div class="review-main">
+          <div class="card">
+            <h2>{t.summary}</h2>
+            <div class="sum-file">
+              <span class="pdf-badge">PDF</span>
+              <span class="sum-file-name" id="sum-file"></span>
+              <button type="button" class="link-btn small" data-goto="0">{t.edit}</button>
+            </div>
+            <div class="sum-signers-head">
+              <strong class="small" id="sum-seq"></strong>
+              <button type="button" class="link-btn small" data-goto="1">{t.edit}</button>
+            </div>
+            <div id="sum-signers" class="sum-signers"></div>
+          </div>
+          <div class="card">
+            <h2>{t.msgTitle}</h2>
+            <div class="field" style="margin-top:16px">
+              <label for="subject">{t.subject}</label>
+              <input class="input" id="subject" maxlength="300" />
+            </div>
+            <div class="field" style="margin-top:14px">
+              <label for="message">{t.message}</label>
+              <textarea class="textarea" id="message" maxlength="5000" rows="5"></textarea>
+            </div>
+            <div class="field" style="margin-top:14px">
+              <span class="label">{t.expiry}</span>
+              <div class="expiry" id="expiry">
+                {[7, 14, 30].map((n) => <button type="button" data-days={n}>{n} {t.days}</button>)}
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="card preview">
+          <span class="label" style="font-weight:600">{t.emailPreview}</span>
+          <p class="small muted pv-meta">{t.from}: {config.org} {t.via}<br />{t.to}: <span id="pv-to"></span></p>
+          <h3 id="pv-subject"></h3>
+          <p class="pv-msg" id="pv-msg"></p>
+          <span class="btn btn-block" aria-hidden="true">{t.reviewSign}</span>
+          <p class="small faint" id="pv-expiry"></p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="actionbar">
+    <span class="ab-status" id="ab-status"></span>
+    <div class="ab-buttons">
+      <button class="btn btn-soft" type="button" id="back-btn">{t.back}</button>
+      <button class="btn" type="button" id="next-btn">{t.next}</button>
+    </div>
+  </div>
+</App>
+
+<script>
+  import '../scripts/wizard';
+</script>
+
+<style>
+  .wiz {
+    max-width: 1180px;
+  }
+  .back-link {
+    display: inline-block;
+    font-weight: 600;
+    text-decoration: none;
+    margin-bottom: 18px;
+  }
+  .wiz-head {
+    margin: 26px 0 22px;
+  }
+  .wiz-head p {
+    margin: 6px 0 0;
+  }
+  .drop {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    text-align: center;
+    padding: 56px 24px;
+    border: 2px dashed #a9cdb8;
+    cursor: pointer;
+    max-width: 760px;
+  }
+  .drop.over {
+    border-color: var(--forest);
+    background: var(--mint-3);
+  }
+  .drop-icon {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    background: var(--mint);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .drop-title {
+    font-family: var(--font-head);
+    font-size: 19px;
+  }
+  .file-card {
+    max-width: 760px;
+  }
+  .file-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .pdf-badge {
+    background: var(--danger-bg);
+    color: var(--danger);
+    font-weight: 700;
+    font-size: 12px;
+    border-radius: 8px;
+    padding: 6px 8px;
+    flex: none;
+  }
+  .file-meta {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex: 1;
+  }
+  .file-meta strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ok {
+    color: var(--forest);
+    font-weight: 600;
+  }
+  .danger-link {
+    color: var(--danger);
+    margin-top: 16px;
+  }
+  .signers-card {
+    max-width: 860px;
+  }
+  .signers-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    align-items: flex-start;
+    margin-bottom: 16px;
+  }
+  .signers-head p {
+    margin: 4px 0 0;
+  }
+  .toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    flex: none;
+  }
+  .toggle input {
+    position: absolute;
+    opacity: 0;
+  }
+  .track {
+    width: 44px;
+    height: 26px;
+    border-radius: 999px;
+    background: #c3d8cb;
+    position: relative;
+    transition: background 0.15s;
+  }
+  .knob {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #fff;
+    transition: left 0.15s;
+  }
+  .toggle input:checked + .track {
+    background: var(--forest);
+  }
+  .toggle input:checked + .track .knob {
+    left: 21px;
+  }
+  .toggle input:focus-visible + .track {
+    outline: 2px solid var(--pulse);
+  }
+  .signer-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  :global(.signer-row) {
+    background: var(--mint-3);
+    border-radius: 18px;
+    padding: 14px;
+    display: grid;
+    grid-template-columns: 30px minmax(0, 1fr) minmax(0, 1fr) 30px;
+    gap: 12px;
+    align-items: end;
+  }
+  :global(.signer-row .num-dot) {
+    margin-bottom: 7px;
+  }
+  :global(.signer-row .ctl) {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  :global(.signer-row .ctl button) {
+    width: 30px;
+    height: 24px;
+    border: 0;
+    border-radius: 8px;
+    background: #fff;
+    cursor: pointer;
+    font-size: 11px;
+  }
+  :global(.signer-row .ctl button.rm) {
+    background: var(--danger-bg);
+    color: var(--danger);
+  }
+  :global(.signer-row .ctl button:disabled) {
+    opacity: 0.35;
+    cursor: default;
+  }
+  .signer-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 16px;
+    flex-wrap: wrap;
+  }
+  .note {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    background: var(--mint);
+    border-radius: 18px;
+    padding: 14px 18px;
+    margin-top: 18px;
+    max-width: 860px;
+    font-size: 14px;
+  }
+  .note-icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--forest);
+    color: #fff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    flex: none;
+  }
+  .place {
+    display: grid;
+    grid-template-columns: 290px minmax(0, 1fr);
+    gap: 22px;
+    align-items: start;
+  }
+  .place-panel {
+    position: sticky;
+    top: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .how {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    font-size: 13.5px;
+    color: var(--ink-2);
+  }
+  .how div {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+  .how .n {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--forest);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+  }
+  .place-signers {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  :global(.ps-card) {
+    background: #fff;
+    border-radius: 20px;
+    padding: 16px;
+    border: 2px solid #fff;
+  }
+  :global(.ps-head) {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+  :global(.ps-head strong) {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  :global(.ps-status) {
+    font-size: 12.5px;
+  }
+  :global(.ps-tools) {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  :global(.ps-tools button) {
+    border: 2px solid var(--mint-3);
+    background: var(--mint-3);
+    border-radius: 12px;
+    padding: 9px 6px;
+    font-weight: 600;
+    font-size: 13.5px;
+    cursor: pointer;
+  }
+  .place-doc {
+    min-width: 0;
+  }
+  .armed {
+    position: sticky;
+    top: 12px;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--ink);
+    color: #fff;
+    border-radius: 999px;
+    padding: 8px 8px 8px 16px;
+    margin-bottom: 14px;
+    font-size: 14px;
+  }
+  .armed-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex: none;
+  }
+  #armed-label {
+    flex: 1;
+  }
+  .pdf-pages.arming :global(.pdf-page) {
+    cursor: crosshair;
+    box-shadow: 0 0 0 3px #ffb27a, var(--shadow);
+  }
+  :global(.fld) {
+    position: absolute;
+    border: 1.5px solid;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: clamp(9px, 1.3cqw, 13px);
+    font-weight: 600;
+    color: var(--ink);
+    cursor: grab;
+    touch-action: none;
+    overflow: visible;
+    white-space: nowrap;
+  }
+  :global(.fld span) {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding: 0 4px;
+  }
+  :global(.fld:active) {
+    cursor: grabbing;
+  }
+  :global(.fld .x) {
+    position: absolute;
+    top: -11px;
+    right: -11px;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: 0;
+    background: var(--danger);
+    color: #fff;
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+    display: none;
+  }
+  :global(.fld.sel .x) {
+    display: block;
+  }
+  :global(.pdf-page) {
+    container-type: inline-size;
+  }
+  .review {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 360px;
+    gap: 20px;
+    align-items: start;
+  }
+  .review-main {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+  .sum-file {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: var(--mint-3);
+    border-radius: 14px;
+    padding: 12px 14px;
+    margin: 16px 0;
+  }
+  .sum-file-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+  }
+  .sum-signers-head {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .sum-signers {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  :global(.sum-signer) {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: var(--mint-3);
+    border-radius: 14px;
+    padding: 12px 14px;
+  }
+  :global(.sum-signer .who) {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .expiry {
+    display: flex;
+    gap: 8px;
+  }
+  .expiry button {
+    border: 0;
+    border-radius: 999px;
+    padding: 8px 16px;
+    font-weight: 600;
+    background: var(--mint-2);
+    color: var(--ink-2);
+    cursor: pointer;
+  }
+  .expiry button.on {
+    background: var(--forest);
+    color: #fff;
+  }
+  .preview {
+    position: sticky;
+    top: 20px;
+  }
+  .pv-meta {
+    margin: 12px 0 16px;
+  }
+  .preview h3 {
+    margin-bottom: 12px;
+  }
+  .pv-msg {
+    white-space: pre-wrap;
+    color: var(--ink-2);
+    margin: 0 0 18px;
+  }
+  .actionbar {
+    position: fixed;
+    left: 260px;
+    right: 0;
+    bottom: 0;
+    background: #fff;
+    border-radius: 24px 24px 0 0;
+    box-shadow: 0 -6px 24px rgba(0, 65, 47, 0.08);
+    padding: 14px 24px calc(14px + env(safe-area-inset-bottom));
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    z-index: 15;
+  }
+  .ab-status {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+  .ab-status.warn {
+    color: var(--peach-ink);
+  }
+  .ab-buttons {
+    display: flex;
+    gap: 10px;
+    flex: none;
+  }
+  @media (max-width: 1100px) {
+    .review {
+      grid-template-columns: 1fr;
+    }
+    .preview {
+      position: static;
+    }
+  }
+  @media (max-width: 900px) {
+    .actionbar {
+      left: 0;
+      padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+      flex-direction: column;
+      align-items: stretch;
+      gap: 8px;
+    }
+    .ab-status {
+      font-size: 13px;
+    }
+    .ab-buttons .btn {
+      flex: 1;
+    }
+    .place {
+      grid-template-columns: 1fr;
+    }
+    .place-panel {
+      position: static;
+    }
+    :global(.signer-row) {
+      grid-template-columns: 30px minmax(0, 1fr) 30px;
+    }
+    :global(.signer-row .f-email) {
+      grid-column: 2;
+    }
+    :global(.signer-row .ctl) {
+      grid-row: 1 / span 2;
+      grid-column: 3;
+      align-self: center;
+    }
+    .signers-head {
+      flex-direction: column;
+    }
+  }
+</style>

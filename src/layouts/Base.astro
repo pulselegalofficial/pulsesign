@@ -1,0 +1,33 @@
+---
+import '../styles/global.css';
+import { dict } from '../lib/i18n';
+interface Props {
+  title: string;
+  /** Include the translated strings for client scripts. */
+  clientStrings?: boolean;
+  bodyClass?: string;
+}
+const { title, clientStrings = false, bodyClass } = Astro.props;
+const lang = Astro.locals.lang;
+---
+<!doctype html>
+<html lang={lang}>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="theme-color" content="#00412F" />
+    <title>{title} · Pulse Sign</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Prompt:wght@500;600&family=Sarabun:wght@400;500;600;700&family=Sriracha&display=swap"
+    />
+    {clientStrings && <script type="application/json" id="i18n" set:html={JSON.stringify({ lang, t: dict(lang) }).replace(/</g, '\\u003c')} />}
+  </head>
+  <body class={bodyClass}>
+    <slot />
+  </body>
+</html>

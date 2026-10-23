@@ -1,0 +1,9 @@
+---
+const lang = Astro.locals.lang;
+const next = Astro.url.pathname + Astro.url.search;
+const href = (l: string) => `/api/lang?lang=${l}&next=${encodeURIComponent(next)}`;
+---
+<span class="seg" role="group" aria-label="Language">
+  <a href={href('th')} class={lang === 'th' ? 'on' : ''} aria-current={lang === 'th' ? 'true' : undefined}>TH</a>
+  <a href={href('en')} class={lang === 'en' ? 'on' : ''} aria-current={lang === 'en' ? 'true' : undefined}>EN</a>
+</span>

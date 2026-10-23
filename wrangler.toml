@@ -1,0 +1,39 @@
+# Cloudflare Workers configuration for Pulse Sign.
+#
+# `astro build` writes the deployable config to dist/server/wrangler.json
+# from this file, so `wrangler deploy` picks up the right entrypoint.
+#
+# Binding names must match the code (src/lib/env.ts). Secrets (RESEND_API_KEY)
+# are set on the Worker in the dashboard, never here.
+account_id = "49a31ae40cc2b778e7678b445bc5e6b1"
+name = "pulsesign"
+compatibility_date = "2026-08-19"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+# Public URL the signing links in emails point at, no trailing slash.
+APP_URL = "https://sign.pulselegal.co"
+ORG_NAME = "Pulse Legal"
+# Who may sign in to the staff dashboard. Comma separated. An entry starting
+# with "@" allows a whole domain, e.g. "@pulselegal.co".
+STAFF_EMAILS = "@pulselegal.co"
+EMAIL_FROM = "Pulse Sign <sign@pulselegal.co>"
+# "browser": the staff member's browser checks uploads and builds the final
+# signed PDF, so the Worker fits the Free plan (10 ms CPU per request).
+# "server": the Worker does it; needs Workers Paid. See README.
+PDF_MODE = "browser"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "pulsesign"
+database_id = "d13e2fe4-1ead-4202-8027-9a3e043d8d55"
+migrations_dir = "migrations"
+
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "pulsesign-files"
+
+[[kv_namespaces]]
+binding = "SESSION"
+# Required by the Astro adapter even though nothing reads it.
+id = "5bcd7b6ce1c94e40875e58116683b049"
