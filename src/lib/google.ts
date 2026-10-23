@@ -23,8 +23,13 @@ function endpoints() {
   return { auth: e.GOOGLE_AUTH_URL || AUTH_URL, token: e.GOOGLE_TOKEN_URL || TOKEN_URL };
 }
 
+// Trimmed: a secret pasted into the dashboard with a stray space or newline
+// would otherwise fail with an opaque invalid_client.
+const clientId = () => (env().GOOGLE_CLIENT_ID || '').trim();
+const clientSecret = () => (env().GOOGLE_CLIENT_SECRET || '').trim();
+
 export function googleConfigured(): boolean {
-  return !!(env().GOOGLE_CLIENT_ID && env().GOOGLE_CLIENT_SECRET);
+  return !!(clientId() && clientSecret());
 }
 
 const b64url = (bytes: ArrayBuffer) =>
@@ -41,7 +46,7 @@ export async function startGoogleLogin(redirectUri: string, next: string): Promi
   const verifier = randomToken(48);
   const challenge = b64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)));
   const params = new URLSearchParams({
-    client_id: env().GOOGLE_CLIENT_ID!,
+    client_id: clientId(),
     redirect_uri: redirectUri,
     response_type: 'code',
     scope: 'openid email profile',
@@ -90,18 +95,30 @@ export function decodeJwtPayload(jwt: string): GoogleClaims | null {
   }
 }
 
+/** Which check an ID token fails, or null if it passes. */
+export function claimProblem(c: GoogleClaims | null, clientId: string, now = Date.now()): string | null {
+  if (!c) return 'no_id_token';
+  if (!c.iss || !ISSUERS.includes(c.iss)) return 'issuer';
+  if (c.aud !== clientId) return 'audience';
+  if (!c.exp || c.exp * 1000 < now) return 'expired';
+  if (c.email_verified !== true && c.email_verified !== 'true') return 'email_not_verified';
+  if (!c.email) return 'no_email';
+  return null;
+}
+
 /** The verified email in a Google ID token, or null if any check fails. */
 export function emailFromClaims(c: GoogleClaims | null, clientId: string, now = Date.now()): { email: string; name: string } | null {
-  if (!c) return null;
-  if (!c.iss || !ISSUERS.includes(c.iss)) return null;
-  if (c.aud !== clientId) return null;
-  if (!c.exp || c.exp * 1000 < now) return null;
-  if (c.email_verified !== true && c.email_verified !== 'true') return null;
-  if (!c.email) return null;
+  if (claimProblem(c, clientId, now) || !c?.email) return null;
   return { email: c.email.trim().toLowerCase(), name: (c.name || '').trim().slice(0, 120) };
 }
 
-export type CallbackResult = { ok: true; email: string; name: string; next: string } | { ok: false; error: 'google' | 'state' };
+/**
+ * `detail` says which step failed (for the sign-in page and the logs). It
+ * holds only Google's error codes, never tokens or secrets.
+ */
+export type CallbackResult =
+  | { ok: true; email: string; name: string; next: string }
+  | { ok: false; error: 'google' | 'state'; detail: string };
 
 /** Checks state against the cookie, exchanges the code, and reads the email. */
 export async function finishGoogleLogin(
@@ -112,9 +129,12 @@ export async function finishGoogleLogin(
   const [state, verifier, ...rest] = (cookieValue || '').split('.');
   const nextRaw = rest.join('.');
   const got = params.get('state') || '';
-  if (!state || !verifier || !got || !safeEqual(await sha256Hex(state), await sha256Hex(got))) return { ok: false, error: 'state' };
+  if (!state || !verifier || !got || !safeEqual(await sha256Hex(state), await sha256Hex(got))) {
+    return { ok: false, error: 'state', detail: !cookieValue ? 'state:no_cookie' : 'state:mismatch' };
+  }
   const code = params.get('code');
-  if (!code || params.get('error')) return { ok: false, error: 'google' };
+  const denied = params.get('error');
+  if (denied || !code) return { ok: false, error: 'google', detail: `authorize:${(denied || 'no_code').slice(0, 60)}` };
 
   const res = await fetch(endpoints().token, {
     method: 'POST',
@@ -122,19 +142,31 @@ export async function finishGoogleLogin(
     body: new URLSearchParams({
       code,
       client_id: env().GOOGLE_CLIENT_ID!,
-      client_secret: env().GOOGLE_CLIENT_SECRET!,
+      client_secret: clientSecret(),
       redirect_uri: redirectUri,
       grant_type: 'authorization_code',
       code_verifier: verifier,
     }),
   });
   if (!res.ok) {
-    console.error('Google token exchange failed', res.status, await res.text());
-    return { ok: false, error: 'google' };
+    const text = await res.text();
+    console.error('Google token exchange failed', res.status, text);
+    let code = `http_${res.status}`;
+    try {
+      code = (JSON.parse(text) as { error?: string }).error || code;
+    } catch {
+      /* keep the status */
+    }
+    return { ok: false, error: 'google', detail: `token:${code.slice(0, 60)}` };
   }
   const body = (await res.json()) as { id_token?: string };
-  const who = emailFromClaims(decodeJwtPayload(body.id_token || ''), env().GOOGLE_CLIENT_ID!);
-  if (!who) return { ok: false, error: 'google' };
+  const claims = decodeJwtPayload(body.id_token || '');
+  const problem = claimProblem(claims, clientId());
+  const who = emailFromClaims(claims, clientId());
+  if (problem || !who) {
+    console.error('Google ID token rejected:', problem, { iss: claims?.iss, aud: claims?.aud });
+    return { ok: false, error: 'google', detail: `id_token:${problem}` };
+  }
 
   let next = '/';
   try {
