@@ -15,6 +15,13 @@ export interface Bindings {
    * all in the Worker and needs Workers Paid.
    */
   PDF_MODE?: string;
+  /** Google OAuth client for staff sign-in (Google Cloud Console → Clients). */
+  GOOGLE_CLIENT_ID?: string;
+  /** Secret. */
+  GOOGLE_CLIENT_SECRET?: string;
+  /** Local development only: point sign-in at scripts/fake-google.mjs. */
+  GOOGLE_AUTH_URL?: string;
+  GOOGLE_TOKEN_URL?: string;
   /** Secret. When unset, emails are printed to the console instead of sent. */
   RESEND_API_KEY?: string;
 }

@@ -67,18 +67,6 @@ export async function otp(o: { doc: DocumentRow; signer: SignerRow; code: string
   await sendEmail({ to: o.signer.email, subject: fill(t.emOtpSubject, { code: o.code }), ...body });
 }
 
-export async function login(o: { email: string; link: string; lang: Lang; request: Request }) {
-  const t = dict(o.lang);
-  const body = renderEmail({
-    logoUrl: logo(o.request),
-    heading: t.emLoginSubject,
-    paragraphs: [t.emLoginBody],
-    button: { label: t.emLoginBtn, url: o.link },
-    footer: [t.emOtpIgnore],
-  });
-  await sendEmail({ to: o.email, subject: t.emLoginSubject, ...body });
-}
-
 export async function completed(o: {
   doc: DocumentRow;
   /** Each in their own language; the sender's falls back to the document's. */
