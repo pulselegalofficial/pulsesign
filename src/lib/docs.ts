@@ -201,8 +201,10 @@ export async function createDraft(user: User, bytes: Uint8Array, meta: UploadMet
   await db().batch([
     db()
       .prepare(
-        `INSERT INTO documents (id, owner_email, title, file_name, file_key, file_size, pages, lang, status, hash_before, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?)`
+        // New documents default to everyone signing at once (sequential = 0);
+        // the wizard can turn signing order on.
+        `INSERT INTO documents (id, owner_email, title, file_name, file_key, file_size, pages, lang, status, sequential, hash_before, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', 0, ?, ?, ?)`
       )
       .bind(id, user.email, titleFromFileName(fileName), fileName, fileKey, bytes.length, pages, lang, hash, now, now),
     eventStmt(id, 'created', actor, null, now),
