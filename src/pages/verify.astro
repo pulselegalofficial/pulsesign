@@ -53,6 +53,7 @@ const isPublic = !Astro.locals.user;
       <section class="evidence" id="v-evidence" hidden>
         <h3>{t.verifyEvidence}</h3>
         <p class="small muted">{t.verifyEvidenceSub}</p>
+        <p class="small muted" id="v-ip-note" hidden>{t.verifyIpStaff}</p>
         <div class="ev-signers" id="v-ev-signers"></div>
         <h3 class="ev-audit-h">{t.audit}</h3>
         <ol class="ev-audit" id="v-audit"></ol>
@@ -78,6 +79,7 @@ const isPublic = !Astro.locals.user;
     return `${date} · ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
   }
   interface VerifiedDoc {
+    staff: boolean;
     id: string;
     title: string;
     completedAt: number;
@@ -106,7 +108,7 @@ const isPublic = !Astro.locals.user;
       const dl = el('dl', 'ev-dl');
       const rows: [string, string, string][] = [
         [t.signedAt, s.signedAt ? fmtS(s.signedAt) : '—', 'mono'],
-        ['IP', s.ip || '—', 'mono'],
+        ...(doc.staff ? [['IP', s.ip || '—', 'mono'] as [string, string, string]] : []),
         [t.device, s.device || '—', ''],
       ];
       for (const [k, v, c] of rows) {
@@ -129,6 +131,7 @@ const isPublic = !Astro.locals.user;
       li.appendChild(body);
       list.appendChild(li);
     }
+    $('v-ip-note').hidden = doc.staff;
     $('v-evidence').hidden = false;
   }
   async function check(file: File) {
