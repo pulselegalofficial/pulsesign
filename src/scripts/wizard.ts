@@ -177,7 +177,7 @@ function formatSize(n: number) {
 }
 
 function renderSigners() {
-  const seq = state.doc?.sequential ?? true;
+  const seq = state.doc?.sequential ?? false;
   $('signer-count').textContent = `${state.signers.length} ${t.signersN}`;
   $('seq-sub').textContent = seq ? t.seqOrderSub : t.seqOffSub;
   $<HTMLInputElement>('seq').checked = seq;
@@ -258,7 +258,7 @@ function removeSigner(i: number) {
 function renderPlacePanel() {
   const isMobile = matchMedia('(max-width: 900px)').matches;
   document.querySelector('.how2')!.textContent = isMobile ? t.placeHow2M : t.placeHow2D;
-  const seq = state.doc?.sequential ?? true;
+  const seq = state.doc?.sequential ?? false;
   $('place-signers').replaceChildren(
     ...state.signers.map((s, i) => {
       const c = color(i);

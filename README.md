@@ -76,8 +76,8 @@ showing who has signed. With signing order off, the page checks every 20
 seconds and shows a signature as soon as another signer adds it. Other
 signers' emails are never sent to the signing page.
 
-With signing order on, the next signer is emailed when the previous one
-signs. Off, everyone is emailed at once.
+Signing order is off by default: everyone is emailed at once. Turned on in
+the wizard, the next signer is emailed when the previous one signs.
 
 Each signer has a language (TH/EN, chosen per signer in the wizard). Their
 emails (request, code, completion) use it, and their signing page opens in it
