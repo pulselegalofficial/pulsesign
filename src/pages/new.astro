@@ -456,6 +456,13 @@ const steps = [t.ws1, t.ws2, t.ws3, t.ws4];
     grid-template-columns: 1fr 1fr;
     gap: 8px;
   }
+  /* Five tools in two columns: the seal takes the full last row. */
+  :global(.ps-tools button:last-child:nth-child(odd)) {
+    grid-column: 1 / -1;
+  }
+  :global(.fld.stamp) {
+    border-radius: 50%;
+  }
   :global(.ps-tools button) {
     border: 2px solid var(--mint-3);
     background: var(--mint-3);

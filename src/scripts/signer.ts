@@ -1,7 +1,7 @@
 import { ApiError, api, strings, toast } from './ui';
 import type { RenderedPage } from './pdfview';
 
-type FieldType = 'sig' | 'initial' | 'name' | 'date';
+type FieldType = 'sig' | 'initial' | 'name' | 'date' | 'stamp';
 interface SField {
   id: string;
   type: FieldType;
@@ -10,7 +10,7 @@ interface SField {
   y: number;
   w: number;
   h: number;
-  /** PNG data URL for sig/initial, display text for name/date. */
+  /** PNG data URL for sig/initial/stamp, display text for name/date. */
   val: string | null;
 }
 
@@ -54,6 +54,10 @@ async function main(cfg: { token: string; step: string; signerName: string; init
   let active = 0;
   let sigImg: string | null = null;
   let initImg: string | null = null;
+  /** The company seal: one image for every seal field, plus what the signer states. */
+  let stampImg: string | null = null;
+  let stampEntity = '';
+  let stampAuthority = false;
   let sheetFor: number | null = null;
   let busy = false;
   let others: OtherField[] = [];
@@ -177,14 +181,15 @@ async function main(cfg: { token: string; step: string; signerName: string; init
     }
   }
 
-  const isImg = (f: { type: FieldType }) => f.type === 'sig' || f.type === 'initial';
-  const fieldName = (type: FieldType) => (type === 'sig' ? t.fSig : type === 'initial' ? t.fInitial : type === 'date' ? t.fDate : t.fName);
+  const isImg = (f: { type: FieldType }) => f.type === 'sig' || f.type === 'initial' || f.type === 'stamp';
+  const fieldName = (type: FieldType) =>
+    type === 'sig' ? t.fSig : type === 'initial' ? t.fInitial : type === 'stamp' ? t.fStamp : type === 'date' ? t.fDate : t.fName;
   const fillIn = (s: string, vars: Record<string, string>) => s.replace(/\{(\w+)\}/g, (m, k) => vars[k] ?? m);
 
   /** What other signers have already put on the page; not interactive. */
   function otherEl(o: OtherField) {
     const el = document.createElement('div');
-    el.className = 'ofld';
+    el.className = o.type === 'stamp' ? 'ofld stamp' : 'ofld';
     el.style.cssText = `left:${o.x * 100}%;top:${o.y * 100}%;width:${o.w * 100}%;height:${o.h * 100}%`;
     const by = fillIn(t.coSignedBy, { name: o.signer });
     el.title = `${fieldName(o.type)} · ${by}`;
@@ -266,7 +271,7 @@ async function main(cfg: { token: string; step: string; signerName: string; init
             const el = document.createElement('button');
             el.type = 'button';
             el.id = `fld-${f.id}`;
-            el.className = `sfld${f.val ? ' filled' : ''}${i === active && !f.val ? ' active' : ''}`;
+            el.className = `sfld${f.val ? ' filled' : ''}${i === active && !f.val ? ' active' : ''}${f.type === 'stamp' ? ' stamp' : ''}`;
             el.style.cssText = `left:${f.x * 100}%;top:${f.y * 100}%;width:${f.w * 100}%;height:${f.h * 100}%`;
             const label = fieldName(f.type);
             el.setAttribute('aria-label', label);
@@ -285,7 +290,7 @@ async function main(cfg: { token: string; step: string; signerName: string; init
               if (i === active) {
                 const flag = document.createElement('span');
                 flag.className = 'flag';
-                flag.textContent = isImg(f) ? t.here : t.hereFill;
+                flag.textContent = f.type === 'stamp' ? t.stampHint : isImg(f) ? t.here : t.hereFill;
                 el.appendChild(flag);
               }
             }
@@ -328,6 +333,11 @@ async function main(cfg: { token: string; step: string; signerName: string; init
   function fill(i: number, fromTap: boolean) {
     const f = fields[i];
     if (!f) return;
+    if (f.type === 'stamp') {
+      if (stampImg && !(f.val && fromTap)) setVal(i, stampImg);
+      else openStampSheet(i);
+      return;
+    }
     if (f.val && fromTap) {
       // Tapping a filled signature lets the signer redo it.
       if (isImg(f)) openSheet(i);
@@ -353,7 +363,11 @@ async function main(cfg: { token: string; step: string; signerName: string; init
     try {
       const images: Record<string, string> = {};
       for (const f of fields) if (isImg(f) && f.val) images[f.id] = f.val;
-      await api(`${base}/submit`, { method: 'POST', json: { images } });
+      const sealing = fields.some((f) => f.type === 'stamp');
+      await api(`${base}/submit`, {
+        method: 'POST',
+        json: { images, ...(sealing ? { stamp: { entity: stampEntity, authority: stampAuthority } } : {}) },
+      });
       window.clearInterval(pollTimer);
       location.reload();
     } catch (e) {
@@ -550,6 +564,137 @@ async function main(cfg: { token: string; step: string; signerName: string; init
     });
     const i = sheetFor;
     closeSheet();
+    setVal(i, data);
+  });
+
+  // ─── Company seal ───
+  //
+  // The signer uploads a photo or scan of the seal. The paper is made
+  // transparent here in the browser (nothing heavy runs on the server): each
+  // pixel's darkness becomes its opacity, and the colour is either recovered
+  // from the photo or replaced with a clean red or blue ink.
+  const stampSheet = $('stamp-sheet');
+  const stampFile = $<HTMLInputElement>('stamp-file');
+  const stampPreview = $<HTMLCanvasElement>('stamp-preview');
+  const stampClean = $<HTMLInputElement>('stamp-clean');
+  const stampEntityInput = $<HTMLInputElement>('stamp-entity');
+  const stampAuthBox = $<HTMLInputElement>('stamp-authority');
+  const INKS: Record<string, [number, number, number] | null> = { original: null, red: [196, 30, 45], blue: [28, 58, 160] };
+  let stampFor: number | null = null;
+  let stampSource: HTMLCanvasElement | null = null;
+  let ink = 'original';
+
+  function openStampSheet(i: number) {
+    stampFor = i;
+    stampEntityInput.value = stampEntity;
+    stampAuthBox.checked = stampAuthority;
+    stampSheet.hidden = false;
+  }
+  stampSheet.addEventListener('click', (e) => {
+    if (e.target === stampSheet || (e.target as HTMLElement).closest('[data-close]')) {
+      stampSheet.hidden = true;
+      stampFor = null;
+    }
+  });
+
+  /** Paper → transparent, ink → opaque. Returns a new canvas. */
+  function cleanStamp(src: HTMLCanvasElement): HTMLCanvasElement {
+    const out = document.createElement('canvas');
+    out.width = src.width;
+    out.height = src.height;
+    const ctx = out.getContext('2d')!;
+    ctx.drawImage(src, 0, 0);
+    const img = ctx.getImageData(0, 0, out.width, out.height);
+    const d = img.data;
+    // Pixels lighter than `hi` count as paper; darker than `lo` as full ink.
+    const hi = 248 - Number(stampClean.value) * 1.1;
+    const lo = Math.max(0, hi - 110);
+    const tint = INKS[ink];
+    for (let p = 0; p < d.length; p += 4) {
+      const r = d[p], g = d[p + 1], b = d[p + 2];
+      // Use the darkest channel too, so saturated red ink is not mistaken for paper.
+      const lum = Math.min(0.299 * r + 0.587 * g + 0.114 * b, Math.min(r, g, b) + 60);
+      let a = lum >= hi ? 0 : lum <= lo ? 1 : (hi - lum) / (hi - lo);
+      a *= d[p + 3] / 255;
+      if (tint) {
+        d[p] = tint[0];
+        d[p + 1] = tint[1];
+        d[p + 2] = tint[2];
+      } else if (a > 0) {
+        // Undo the white paper showing through: c = a·ink + (1−a)·255.
+        d[p] = Math.max(0, Math.min(255, (r - 255 * (1 - a)) / a));
+        d[p + 1] = Math.max(0, Math.min(255, (g - 255 * (1 - a)) / a));
+        d[p + 2] = Math.max(0, Math.min(255, (b - 255 * (1 - a)) / a));
+      }
+      d[p + 3] = Math.round(a * 255);
+    }
+    ctx.putImageData(img, 0, 0);
+    return out;
+  }
+
+  function paintStamp() {
+    if (!stampSource) return;
+    const cleaned = cleanStamp(stampSource);
+    stampPreview.width = cleaned.width;
+    stampPreview.height = cleaned.height;
+    const ctx = stampPreview.getContext('2d')!;
+    ctx.clearRect(0, 0, cleaned.width, cleaned.height);
+    ctx.drawImage(cleaned, 0, 0);
+  }
+
+  stampFile.addEventListener('change', () => {
+    const file = stampFile.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        // Seals are small on the page; 900 px is plenty and keeps the PNG light.
+        const img = new Image();
+        img.src = String(reader.result);
+        await img.decode();
+        const scale = Math.min(1, 900 / Math.max(img.naturalWidth, img.naturalHeight));
+        const c = document.createElement('canvas');
+        c.width = Math.max(1, Math.round(img.naturalWidth * scale));
+        c.height = Math.max(1, Math.round(img.naturalHeight * scale));
+        c.getContext('2d')!.drawImage(img, 0, 0, c.width, c.height);
+        stampSource = c;
+        $('stamp-empty').hidden = true;
+        stampPreview.hidden = false;
+        $('stamp-tools').hidden = false;
+        paintStamp();
+      } catch {
+        toast(t.stampNeedImage, true);
+      }
+    };
+    reader.readAsDataURL(file);
+  });
+  stampSheet.querySelectorAll<HTMLButtonElement>('[data-ink]').forEach((b) =>
+    b.addEventListener('click', () => {
+      ink = b.dataset.ink!;
+      stampSheet.querySelectorAll('[data-ink]').forEach((x) => x.classList.toggle('on', x === b));
+      paintStamp();
+    })
+  );
+  stampClean.addEventListener('input', paintStamp);
+
+  $('adopt-stamp').addEventListener('click', () => {
+    if (stampFor === null) return;
+    const entity = stampEntityInput.value.trim();
+    if (!stampSource && !stampImg) return toast(t.stampNeedImage, true);
+    if (!entity) return toast(t.stampNeedEntity, true);
+    if (!stampAuthBox.checked) return toast(t.stampNeedAuthority, true);
+    const data = stampSource ? trimmedPng(cleanStamp(stampSource)) : stampImg;
+    if (!data) return toast(t.stampNeedImage, true);
+    stampImg = data;
+    stampEntity = entity;
+    stampAuthority = true;
+    // One seal per signer: a new image replaces it in every seal field.
+    fields.forEach((x) => {
+      if (x.type === 'stamp' && x.val) x.val = data;
+    });
+    const i = stampFor;
+    stampSheet.hidden = true;
+    stampFor = null;
     setVal(i, data);
   });
 

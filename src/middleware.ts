@@ -32,6 +32,11 @@ const SECURITY_HEADERS: Record<string, string> = {
 function withHeaders(response: Response, extra: Record<string, string> = {}): Response {
   const headers = new Headers(response.headers);
   for (const [k, v] of Object.entries({ ...SECURITY_HEADERS, ...extra })) headers.set(k, v);
+  // Staff-uploaded attachments: never let one run script on this origin.
+  if (headers.get('x-sandbox')) {
+    headers.delete('x-sandbox');
+    headers.set('content-security-policy', "sandbox; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'");
+  }
   if (!headers.has('cache-control')) headers.set('cache-control', 'no-store');
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }

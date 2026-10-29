@@ -9,12 +9,15 @@ import { displayName } from './auth';
 import * as mail from './mailers';
 import {
   FIELD_TYPES,
+  isImageField,
+  type AttachmentRow,
   type DocStatus,
   type DocumentRow,
   type EventRow,
   type EventType,
   type FieldInput,
   type FieldRow,
+  type FolderRow,
   type SignerInput,
   type SignerRow,
   type User,
@@ -96,14 +99,16 @@ export async function getUser(email: string): Promise<User> {
 
 export interface DocSummary extends DocumentRow {
   signers: Pick<SignerRow, 'name' | 'email' | 'status' | 'position'>[];
+  attachments: number;
 }
 
 /** Every document in the firm, newest activity first. */
 export async function listDocs(): Promise<DocSummary[]> {
   await expireDue();
-  const [docs, signers] = await db().batch<DocumentRow | SignerRow>([
+  const [docs, signers, atts] = await db().batch<DocumentRow | SignerRow | { doc_id: string; n: number }>([
     db().prepare('SELECT * FROM documents ORDER BY updated_at DESC LIMIT 500'),
     db().prepare('SELECT doc_id, name, email, status, position FROM signers ORDER BY doc_id, position'),
+    db().prepare('SELECT doc_id, COUNT(*) AS n FROM attachments GROUP BY doc_id'),
   ]);
   const byDoc = new Map<string, DocSummary['signers']>();
   for (const s of signers.results as SignerRow[]) {
@@ -111,7 +116,8 @@ export async function listDocs(): Promise<DocSummary[]> {
     list.push(s);
     byDoc.set(s.doc_id, list);
   }
-  return (docs.results as DocumentRow[]).map((d) => ({ ...d, signers: byDoc.get(d.id) || [] }));
+  const attCount = new Map((atts.results as { doc_id: string; n: number }[]).map((r) => [r.doc_id, r.n]));
+  return (docs.results as DocumentRow[]).map((d) => ({ ...d, signers: byDoc.get(d.id) || [], attachments: attCount.get(d.id) || 0 }));
 }
 
 /** Marks documents whose links have passed their expiry date. */
@@ -305,8 +311,8 @@ export async function replaceDraftFile(doc: DocumentRow, bytes: Uint8Array, meta
 
 /**
  * Permanently deletes a document in any status: every file in R2 (original,
- * signature images, signed PDF) and every row in D1 (signers, fields, audit
- * trail). Nothing is kept. Anything other than a draft must be confirmed by
+ * signature images, signed PDF, attachments) and every row in D1 (signers,
+ * fields, attachments, audit trail). Nothing is kept. Anything other than a draft must be confirmed by
  * passing its document number.
  *
  * Order matters so a failure can simply be retried: signing links are revoked
@@ -333,6 +339,7 @@ export async function deleteDocument(doc: DocumentRow, confirmId: string | null)
   for (let i = 0; i < all.length; i += 1000) await files().delete(all.slice(i, i + 1000));
 
   await db().batch([
+    db().prepare('DELETE FROM attachments WHERE doc_id = ?').bind(doc.id),
     db().prepare('DELETE FROM events WHERE doc_id = ?').bind(doc.id),
     db().prepare('DELETE FROM fields WHERE doc_id = ?').bind(doc.id),
     db().prepare('DELETE FROM signers WHERE doc_id = ?').bind(doc.id),
@@ -524,6 +531,14 @@ function decodeDataUrlPng(value: unknown): Uint8Array | null {
   }
 }
 
+/** What a signer states when they affix a company seal. */
+export interface StampInput {
+  /** The company or entity the seal belongs to. */
+  entity?: unknown;
+  /** Ticked: "I am authorised to sign and seal on behalf of this entity". */
+  authority?: unknown;
+}
+
 export interface SubmitResult {
   completed: boolean;
   nextSigner: string | null;
@@ -532,14 +547,17 @@ export interface SubmitResult {
 
 /**
  * Records a signer's signature. `images` maps field id → PNG data URL for
- * their signature and initials fields; names and dates are filled in here from
- * the signer record and the server clock, so they cannot be back-dated.
+ * their signature, initials and seal fields; names and dates are filled in
+ * here from the signer record and the server clock, so they cannot be
+ * back-dated. A signer with seal fields must name the entity and confirm their
+ * authority (`stamp`); the seal's SHA-256 is kept as evidence.
  */
 export async function submitSignature(
   ctx: SignerContext,
   images: Record<string, string>,
   actor: Actor,
-  request: Request
+  request: Request,
+  stamp: StampInput = {}
 ): Promise<SubmitResult> {
   const { doc, signer } = ctx;
   if (!ACTIVE.includes(doc.status)) throw new DocError('not_active', 409);
@@ -547,19 +565,30 @@ export async function submitSignature(
   if (!signer.consent_at) throw new DocError('consent_required', 400);
 
   const mine = (await getFields(doc.id)).filter((f) => f.signer_pos === signer.position);
+  const sealing = mine.some((f) => f.type === 'stamp');
+  const entity = typeof stamp.entity === 'string' ? stamp.entity.trim().slice(0, 200) : '';
+  if (sealing && !entity) throw new DocError('stampNeedEntity', 400);
+  if (sealing && stamp.authority !== true) throw new DocError('stampNeedAuthority', 400);
   const now = Date.now();
   const lang = docLang(doc);
   const stillOpen = `(SELECT status FROM signers WHERE id = ?) IN ('sent', 'opened')
     AND (SELECT status FROM documents WHERE id = ?) IN ('sent', 'opened')`;
   const stmts: D1PreparedStatement[] = [];
   const uploads: [string, Uint8Array][] = [];
+  let stampHash: string | null = null;
   for (const f of mine) {
     let value: string;
-    if (f.type === 'sig' || f.type === 'initial') {
+    if (isImageField(f.type)) {
       const png = decodeDataUrlPng(images[f.id]);
       if (!png) throw new DocError('missing_field', 400);
       value = `docs/${doc.id}/fields/${f.id}.png`;
       uploads.push([value, png]);
+      // One seal per signer: every seal field carries the same image.
+      if (f.type === 'stamp') {
+        const h = await sha256Hex(png);
+        if (stampHash && stampHash !== h) throw new DocError('missing_field', 400);
+        stampHash = h;
+      }
     } else if (f.type === 'name') {
       value = signer.name;
     } else {
@@ -574,12 +603,28 @@ export async function submitSignature(
   // One transaction. If another request signed or the request was cancelled
   // in the meantime, every statement is a no-op and nothing is recorded.
   const signerUpdate = db()
-    .prepare(`UPDATE signers SET status = 'signed', signed_at = ?, ip = ?, user_agent = ? WHERE id = ? AND ${stillOpen}`)
-    .bind(now, actor.ip ?? null, actor.ua ?? null, signer.id, signer.id, doc.id);
+    .prepare(
+      `UPDATE signers SET status = 'signed', signed_at = ?, ip = ?, user_agent = ?,
+         stamp_entity = ?, stamp_sha256 = ?, stamp_authority_at = ?
+       WHERE id = ? AND ${stillOpen}`
+    )
+    .bind(
+      now,
+      actor.ip ?? null,
+      actor.ua ?? null,
+      sealing ? entity : null,
+      stampHash,
+      sealing ? now : null,
+      signer.id,
+      signer.id,
+      doc.id
+    );
   const results = await db().batch([...stmts, signerUpdate]);
   if (!results[results.length - 1].meta.changes) throw new DocError('alreadySigned', 409);
   await db().batch([
     eventStmt(doc.id, 'signed', actor, null, now),
+    // The entity is shown in the trail; the seal's hash is on the certificate.
+    ...(sealing ? [eventStmt(doc.id, 'stamped', actor, entity, now)] : []),
     db().prepare('UPDATE documents SET updated_at = ? WHERE id = ?').bind(now, doc.id),
   ]);
 
@@ -680,6 +725,9 @@ export async function finalizeInput(doc: DocumentRow, request: Request) {
       otp_verified_at: s.otp_verified_at,
       ip: s.ip,
       user_agent: s.user_agent,
+      stamp_entity: s.stamp_entity,
+      stamp_sha256: s.stamp_sha256,
+      stamp_authority_at: s.stamp_authority_at,
     })),
     events: events.map((e) => ({ type: e.type, at: e.at, actor_name: e.actor_name, detail: e.detail, ip: e.ip })),
     fields: fields
@@ -694,7 +742,7 @@ export async function finalizeInput(doc: DocumentRow, request: Request) {
         w: f.w,
         h: f.h,
         // Text for name/date; images are fetched separately.
-        value: f.type === 'sig' || f.type === 'initial' ? null : f.value,
+        value: isImageField(f.type) ? null : f.value,
       })),
     senderName: displayName(owner),
     orgName: orgName(),
@@ -702,10 +750,10 @@ export async function finalizeInput(doc: DocumentRow, request: Request) {
   };
 }
 
-/** A signature or initials image, for building the final PDF. */
+/** A signature, initials or seal image, for building the final PDF. */
 export async function fieldImage(doc: DocumentRow, fieldId: string): Promise<R2ObjectBody | null> {
   const f = await db().prepare('SELECT value, type FROM fields WHERE id = ? AND doc_id = ?').bind(fieldId, doc.id).first<{ value: string | null; type: string }>();
-  if (!f?.value || (f.type !== 'sig' && f.type !== 'initial')) return null;
+  if (!f?.value || !isImageField(f.type)) return null;
   return files().get(f.value);
 }
 
@@ -756,7 +804,7 @@ async function finalizeOnServer(doc: DocumentRow, request: Request): Promise<voi
   const signatures = new Map<number, Uint8Array>();
   for (const f of fields) {
     if (!f.value) continue;
-    if (f.type === 'sig' || f.type === 'initial') {
+    if (isImageField(f.type)) {
       const image = await readR2(f.value);
       contents.push({ field: f, image });
       if (f.type === 'sig' && !signatures.has(f.signer_pos)) signatures.set(f.signer_pos, image);
@@ -798,4 +846,159 @@ export async function findByHash(hash: string) {
     .first<DocumentRow>();
   if (!doc) return null;
   return { doc, signers: await getSigners(doc.id) };
+}
+
+// ───────────────────────────── Folders ─────────────────────────────
+//
+// Folders organise completed documents in the dashboard. They are labels on
+// the document row only: moving a document never touches its files, hashes
+// or audit trail, and nothing about folders reaches signers or /verify.
+
+export const MAX_FOLDERS = 200;
+const folderName = (v: unknown) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, 80) : '');
+
+export async function listFolders(): Promise<FolderRow[]> {
+  const r = await db().prepare('SELECT * FROM folders ORDER BY name COLLATE NOCASE').all<FolderRow>();
+  return r.results;
+}
+
+export async function createFolder(name: unknown, user: User): Promise<FolderRow> {
+  const clean = folderName(name);
+  if (!clean) throw new DocError('folderNeedName', 400);
+  const count = await db().prepare('SELECT COUNT(*) AS n FROM folders').first<{ n: number }>();
+  if ((count?.n || 0) >= MAX_FOLDERS) throw new DocError('folderTooMany', 400);
+  const dup = await db().prepare('SELECT id FROM folders WHERE name = ? COLLATE NOCASE').bind(clean).first();
+  if (dup) throw new DocError('folderExists', 409);
+  const now = Date.now();
+  const row: FolderRow = { id: randomId('fdr'), name: clean, created_by: user.email, created_at: now, updated_at: now };
+  await db()
+    .prepare('INSERT INTO folders (id, name, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
+    .bind(row.id, row.name, row.created_by, row.created_at, row.updated_at)
+    .run();
+  return row;
+}
+
+export async function renameFolder(id: string, name: unknown): Promise<void> {
+  const clean = folderName(name);
+  if (!clean) throw new DocError('folderNeedName', 400);
+  const dup = await db().prepare('SELECT id FROM folders WHERE name = ? COLLATE NOCASE AND id != ?').bind(clean, id).first();
+  if (dup) throw new DocError('folderExists', 409);
+  const r = await db().prepare('UPDATE folders SET name = ?, updated_at = ? WHERE id = ?').bind(clean, Date.now(), id).run();
+  if (!r.meta.changes) throw new DocError('not_found', 404);
+}
+
+/** Removes a folder. Its documents are kept and become unfiled. */
+export async function deleteFolder(id: string): Promise<void> {
+  await db().batch([
+    db().prepare('UPDATE documents SET folder_id = NULL WHERE folder_id = ?').bind(id),
+    db().prepare('DELETE FROM folders WHERE id = ?').bind(id),
+  ]);
+}
+
+/**
+ * Files a completed document in a folder, or unfiles it (`folderId` null).
+ * Does not change `updated_at`, so the dashboard order stays the same.
+ */
+export async function moveToFolder(doc: DocumentRow, folderId: string | null): Promise<void> {
+  if (doc.status !== 'completed') throw new DocError('folderOnlyCompleted', 409);
+  if (folderId) {
+    const f = await db().prepare('SELECT id FROM folders WHERE id = ?').bind(folderId).first();
+    if (!f) throw new DocError('not_found', 404);
+  }
+  await db().prepare('UPDATE documents SET folder_id = ? WHERE id = ?').bind(folderId, doc.id).run();
+}
+
+// ───────────────────────────── Attachments ─────────────────────────────
+//
+// Reference files staff keep with a document: supporting documents, receipts.
+// They live beside the document in R2 (docs/<id>/attachments/) and are never
+// stamped into the signed PDF, so hash_before and hash_final are unaffected.
+// Staff only: signers never see them and /verify never returns them. Adding or
+// removing one is not a signing event, so it is not written to the audit trail
+// (which /verify shows to anyone holding the signed file).
+
+export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+export const MAX_ATTACHMENTS = 30;
+
+/** Types that are safe to open in the browser; everything else downloads. */
+const INLINE_TYPES = ['application/pdf', 'image/png', 'image/jpeg', 'image/webp', 'image/gif', 'text/plain'];
+const ALLOWED_TYPES = [
+  ...INLINE_TYPES,
+  'image/heic',
+  'text/csv',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'application/zip',
+  'message/rfc822',
+];
+/** Anything not on the list is stored as opaque bytes and always downloaded. */
+export const attachmentType = (t: string | null) => {
+  const base = (t || '').split(';')[0].trim().toLowerCase();
+  return ALLOWED_TYPES.includes(base) ? base : 'application/octet-stream';
+};
+export const attachmentInline = (t: string) => INLINE_TYPES.includes(t);
+
+export async function listAttachments(docId: string): Promise<AttachmentRow[]> {
+  const r = await db().prepare('SELECT * FROM attachments WHERE doc_id = ? ORDER BY created_at').bind(docId).all<AttachmentRow>();
+  return r.results;
+}
+
+export const getAttachment = (docId: string, id: string) =>
+  db().prepare('SELECT * FROM attachments WHERE id = ? AND doc_id = ?').bind(id, docId).first<AttachmentRow>();
+
+export interface AttachmentUpload {
+  name: string;
+  contentType: string | null;
+  /** SHA-256 measured by the browser; R2 checks it against the bytes. */
+  sha256: string;
+  note?: string;
+}
+
+export async function addAttachment(doc: DocumentRow, bytes: Uint8Array, meta: AttachmentUpload, user: User): Promise<AttachmentRow> {
+  if (doc.status === 'draft') throw new DocError('not_draft', 409);
+  if (!bytes.length) throw new DocError('attEmpty', 400);
+  if (bytes.length > MAX_ATTACHMENT_BYTES) throw new DocError('attTooLarge', 413);
+  if (!isHex64(meta.sha256)) throw new DocError('hashMismatch', 400);
+  const count = await db().prepare('SELECT COUNT(*) AS n FROM attachments WHERE doc_id = ?').bind(doc.id).first<{ n: number }>();
+  if ((count?.n || 0) >= MAX_ATTACHMENTS) throw new DocError('attTooMany', 400);
+  const id = randomId('att');
+  const row: AttachmentRow = {
+    id,
+    doc_id: doc.id,
+    name: meta.name.replace(/[\u0000-\u001f\\/]+/g, '_').trim().slice(0, 200) || 'file',
+    content_type: attachmentType(meta.contentType),
+    size: bytes.length,
+    sha256: meta.sha256,
+    r2_key: `docs/${doc.id}/attachments/${id}`,
+    note: (meta.note || '').trim().slice(0, 300),
+    uploaded_by: user.email,
+    created_at: Date.now(),
+  };
+  try {
+    await files().put(row.r2_key, bytes, { httpMetadata: { contentType: row.content_type }, sha256: row.sha256 });
+  } catch {
+    throw new DocError('hashMismatch');
+  }
+  await db()
+    .prepare(
+      `INSERT INTO attachments (id, doc_id, name, content_type, size, sha256, r2_key, note, uploaded_by, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .bind(row.id, row.doc_id, row.name, row.content_type, row.size, row.sha256, row.r2_key, row.note, row.uploaded_by, row.created_at)
+    .run();
+  return row;
+}
+
+export async function updateAttachmentNote(att: AttachmentRow, note: unknown): Promise<void> {
+  const clean = typeof note === 'string' ? note.trim().slice(0, 300) : '';
+  await db().prepare('UPDATE attachments SET note = ? WHERE id = ?').bind(clean, att.id).run();
+}
+
+export async function deleteAttachment(att: AttachmentRow): Promise<void> {
+  await files().delete(att.r2_key);
+  await db().prepare('DELETE FROM attachments WHERE id = ?').bind(att.id).run();
 }

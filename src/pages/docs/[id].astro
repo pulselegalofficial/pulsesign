@@ -2,8 +2,19 @@
 import App from '../../layouts/App.astro';
 import StatusChip from '../../components/StatusChip.astro';
 import { actorLabel, dict, fill } from '../../lib/i18n';
-import { expireDue, getDoc, getEvents, getSigners } from '../../lib/docs';
-import { describeUserAgent, formatDate } from '../../lib/format';
+import {
+  MAX_ATTACHMENT_BYTES,
+  attachmentInline,
+  expireDue,
+  getDoc,
+  getEvents,
+  getSigners,
+  getUser,
+  listAttachments,
+  listFolders,
+} from '../../lib/docs';
+import { displayName } from '../../lib/auth';
+import { describeUserAgent, formatBytes, formatDate } from '../../lib/format';
 
 const lang = Astro.locals.lang;
 const t = dict(lang);
@@ -11,11 +22,22 @@ await expireDue();
 const doc = await getDoc(Astro.params.id!);
 if (!doc) return Astro.redirect('/');
 if (doc.status === 'draft') return Astro.redirect(`/new?id=${doc.id}`);
-const [signers, events] = await Promise.all([getSigners(doc.id), getEvents(doc.id)]);
+const [signers, events, attachmentRows, folders] = await Promise.all([getSigners(doc.id), getEvents(doc.id), listAttachments(doc.id), listFolders()]);
+const uploaders = new Map(await Promise.all([...new Set(attachmentRows.map((a) => a.uploaded_by))].map(async (e) => [e, displayName(await getUser(e))] as const)));
+const attachments = attachmentRows.map((a) => ({
+  id: a.id,
+  name: a.name,
+  note: a.note,
+  size: formatBytes(a.size),
+  sha256: a.sha256,
+  href: `/api/docs/${doc.id}/attachments/${a.id}`,
+  inline: attachmentInline(a.content_type),
+  by: fill(t.attBy, { who: uploaders.get(a.uploaded_by) || a.uploaded_by, time: formatDate(a.created_at, lang, { time: true }) }),
+}));
 const active = doc.status === 'sent' || doc.status === 'opened';
 const tt = t as Record<string, string>;
 const kind = (type: string) =>
-  ['signed', 'completed'].includes(type) ? 'good' : ['opened', 'otp_verified', 'consent', 'otp_sent'].includes(type) ? 'warm' : ['declined', 'cancelled', 'expired', 'otp_failed'].includes(type) ? 'bad' : 'base';
+  ['signed', 'stamped', 'completed'].includes(type) ? 'good' : ['opened', 'otp_verified', 'consent', 'otp_sent'].includes(type) ? 'warm' : ['declined', 'cancelled', 'expired', 'otp_failed'].includes(type) ? 'bad' : 'base';
 const evs = events.map((e) => ({
   label: fill(tt[`ev_${e.type}`] || e.type, { name: e.detail || '' }),
   extra: e.type === 'declined' && e.detail ? `${t.declineReasonLabel}: “${e.detail}”` : '',
@@ -101,6 +123,51 @@ const finalPending = doc.status === 'completed' && !doc.final_key;
           }
         </div>
       </section>
+      {
+        doc.status === 'completed' && (
+          <section class="card">
+            <label class="side-h2" for="folder-select">{t.folderLabel}</label>
+            <select class="input folder-select" id="folder-select">
+              <option value="" selected={!doc.folder_id}>{t.folderNone}</option>
+              {folders.map((f) => (
+                <option value={f.id} selected={doc.folder_id === f.id}>{f.name}</option>
+              ))}
+            </select>
+          </section>
+        )
+      }
+      <section class="card">
+        <div class="att-head">
+          <h2>{t.attachments}</h2>
+          <span class="small muted">{attachments.length || ''}</span>
+        </div>
+        <p class="small muted att-sub">{t.attSub}</p>
+        <ul class="att-list" id="att-list">
+          {
+            attachments.map((a) => (
+              <li class="att" data-att={a.id} data-name={a.name}>
+                <span class="att-icon" aria-hidden="true">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5l-8.6 8.6a5.5 5.5 0 01-7.8-7.8l9-9a3.7 3.7 0 015.2 5.2l-9 9a1.8 1.8 0 01-2.6-2.6l8.3-8.3" /></svg>
+                </span>
+                <div class="att-main">
+                  <a href={a.href} target={a.inline ? '_blank' : undefined} rel="noopener" class="att-name">{a.name}</a>
+                  {a.note && <span class="small att-note">{a.note}</span>}
+                  <span class="small faint">{a.size} · {a.by}</span>
+                  <span class="mono att-hash" title="SHA-256">{a.sha256}</span>
+                </div>
+                <button class="link-btn small att-del" type="button" data-del={a.id}>{t.attDelete}</button>
+              </li>
+            ))
+          }
+        </ul>
+        {attachments.length === 0 && <p class="small faint att-empty" id="att-empty">{t.attEmptyList}</p>}
+        <input class="input att-note-input" id="att-note" maxlength="300" placeholder={t.attNotePh} autocomplete="off" />
+        <label class="btn btn-soft btn-block att-add">
+          <input type="file" id="att-file" class="sr-only" multiple />
+          + {t.attAdd}
+        </label>
+        <p class="small muted" id="att-status" hidden></p>
+      </section>
       <section class="card">
         <h2>{t.evidence}</h2>
         <span class="label" style="margin-top:16px">{t.hashBefore}</span>
@@ -138,13 +205,82 @@ const finalPending = doc.status === 'completed' && !doc.final_key;
       </div>
     </div>
   </div>
-  <script type="application/json" id="detail-config" set:html={JSON.stringify({ id: doc.id, justSent, finalPending })} />
+  <script type="application/json" id="detail-config" set:html={JSON.stringify({ id: doc.id, justSent, finalPending, maxAtt: MAX_ATTACHMENT_BYTES })} />
 </App>
 
 <script>
-  import { ApiError, api, strings, toast } from '../../scripts/ui';
+  import { ApiError, api, fill, strings, toast } from '../../scripts/ui';
+  import { sha256Hex } from '../../scripts/pdfwork';
   const t = strings();
-  const { id, justSent, finalPending } = JSON.parse(document.getElementById('detail-config')!.textContent!);
+  const { id, justSent, finalPending, maxAtt } = JSON.parse(document.getElementById('detail-config')!.textContent!);
+  const errText = (e: unknown) => (e instanceof ApiError && t[e.code] ? t[e.code] : t.errGeneric);
+
+  // ─── Folder ───
+  const folderSelect = document.getElementById('folder-select') as HTMLSelectElement | null;
+  folderSelect?.addEventListener('change', async () => {
+    const value = folderSelect.value;
+    try {
+      await api(`/api/docs/${id}/folder`, { method: 'PUT', json: { folderId: value || null } });
+      toast(value ? fill(t.folderMoved, { name: folderSelect.selectedOptions[0].text }) : t.folderUnfiled);
+    } catch (e) {
+      toast(errText(e), true);
+    }
+  });
+
+  // ─── Attachments (kept beside the document; the signed PDF and its hash are untouched) ───
+  const attFile = document.getElementById('att-file') as HTMLInputElement;
+  const attStatus = document.getElementById('att-status')!;
+  attFile.addEventListener('change', async () => {
+    const list = [...(attFile.files || [])];
+    attFile.value = '';
+    if (!list.length) return;
+    const note = (document.getElementById('att-note') as HTMLInputElement).value.trim();
+    let added = 0;
+    attFile.disabled = true;
+    for (const file of list) {
+      if (file.size > maxAtt) {
+        toast(`${file.name}: ${t.attTooLarge}`, true);
+        continue;
+      }
+      attStatus.hidden = false;
+      attStatus.textContent = fill(t.attUploading, { name: file.name });
+      try {
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        await api(`/api/docs/${id}/attachments`, {
+          method: 'POST',
+          body: bytes as BodyInit,
+          headers: {
+            'content-type': file.type || 'application/octet-stream',
+            'x-file-name': encodeURIComponent(file.name),
+            'x-note': encodeURIComponent(note),
+            'x-sha256': await sha256Hex(bytes),
+          },
+        });
+        added++;
+      } catch (e) {
+        toast(`${file.name}: ${errText(e)}`, true);
+      }
+    }
+    attFile.disabled = false;
+    attStatus.hidden = true;
+    if (added) {
+      toast(fill(t.attAdded, { n: added }));
+      setTimeout(() => location.reload(), 700);
+    }
+  });
+  document.querySelectorAll<HTMLButtonElement>('[data-del]').forEach((b) =>
+    b.addEventListener('click', async () => {
+      const li = b.closest<HTMLElement>('.att')!;
+      if (!confirm(fill(t.attDeleteConfirm, { name: li.dataset.name || '' }))) return;
+      try {
+        await api(`/api/docs/${id}/attachments/${b.dataset.del}`, { method: 'DELETE' });
+        li.remove();
+        toast(t.attDeleted);
+      } catch (e) {
+        toast(errText(e), true);
+      }
+    })
+  );
   if (justSent) {
     toast(t.sentToast);
     history.replaceState(null, '', location.pathname);
@@ -364,6 +500,86 @@ const finalPending = doc.status === 'completed' && !doc.final_key;
   }
   .delete-btn {
     margin-left: auto;
+  }
+  .side-h2 {
+    display: block;
+    font-family: var(--font-head);
+    font-size: 19px;
+    font-weight: 600;
+    color: var(--ink);
+    margin: 0 0 12px;
+  }
+  .folder-select {
+    appearance: auto;
+  }
+  .att-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+  .att-sub {
+    margin: 6px 0 12px;
+  }
+  .att-list {
+    list-style: none;
+    margin: 0 0 12px;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .att {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    background: var(--mint-3);
+    border-radius: 14px;
+    padding: 10px 12px;
+  }
+  .att-icon {
+    color: var(--forest);
+    margin-top: 3px;
+    flex: none;
+  }
+  .att-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .att-name {
+    font-weight: 600;
+    text-decoration: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .att-note {
+    color: var(--ink-2);
+  }
+  .att-hash {
+    font-size: 10.5px;
+    color: var(--faint);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .att-del {
+    color: var(--danger);
+    flex: none;
+  }
+  .att-empty {
+    margin: 0 0 12px;
+  }
+  .att-note-input {
+    margin-bottom: 8px;
+  }
+  .att-add {
+    cursor: pointer;
+  }
+  .att-add:has(input:disabled) {
+    opacity: 0.6;
+    pointer-events: none;
   }
   .modal p {
     margin: 10px 0 0;
