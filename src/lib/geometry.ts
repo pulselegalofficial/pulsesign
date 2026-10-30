@@ -75,3 +75,33 @@ export function clampField<T extends { x: number; y: number; w: number; h: numbe
   const h = Math.min(Math.max(f.h, 0.01), 1);
   return { ...f, w, h, x: Math.min(Math.max(f.x, 0), 1 - w), y: Math.min(Math.max(f.y, 0), 1 - h) };
 }
+
+/** Smallest a field can be resized to in the editor (fractions of the page). */
+export const MIN_FIELD = { w: 0.04, h: 0.02 };
+
+/**
+ * New size for a field whose bottom-right corner is dragged to (right, bottom),
+ * keeping its top-left corner fixed and the whole field on the page.
+ * With `ratio` (h / w, in page fractions) the shape is locked and the axis
+ * dragged further, relative to the current size, drives the scale.
+ */
+export function resizeField(
+  f: { x: number; y: number; w: number; h: number },
+  right: number,
+  bottom: number,
+  ratio?: number
+): { w: number; h: number } {
+  const maxW = 1 - f.x;
+  const maxH = 1 - f.y;
+  const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), Math.max(lo, hi));
+  if (!ratio) {
+    return { w: clamp(right - f.x, MIN_FIELD.w, maxW), h: clamp(bottom - f.y, MIN_FIELD.h, maxH) };
+  }
+  const scale = Math.max((right - f.x) / f.w, (bottom - f.y) / f.h);
+  let w = f.w * scale;
+  // Keep both axes within [min, max] while holding the ratio.
+  const lo = Math.max(MIN_FIELD.w, MIN_FIELD.h / ratio);
+  const hi = Math.min(maxW, maxH / ratio);
+  w = clamp(w, lo, hi);
+  return { w, h: w * ratio };
+}

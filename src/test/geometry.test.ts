@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clampField, displayedToPdf, fitContain, normalizeRotation, placeField } from '../lib/geometry';
+import { MIN_FIELD, clampField, displayedToPdf, fitContain, normalizeRotation, placeField, resizeField } from '../lib/geometry';
 
 const box = { x: 0, y: 0, width: 600, height: 800 };
 
@@ -59,5 +59,41 @@ describe('fitContain', () => {
 describe('clampField', () => {
   it('keeps a field on the page', () => {
     expect(clampField({ x: 0.9, y: -0.2, w: 0.3, h: 0.1 })).toEqual({ x: 0.7, y: 0, w: 0.3, h: 0.1 });
+  });
+});
+
+describe('resizeField', () => {
+  const f = { x: 0.2, y: 0.3, w: 0.3, h: 0.1 };
+
+  it('follows the dragged corner freely without a ratio', () => {
+    const r = resizeField(f, 0.7, 0.5);
+    expect(r.w).toBeCloseTo(0.5);
+    expect(r.h).toBeCloseTo(0.2);
+  });
+
+  it('never shrinks below the minimum, even when dragged past the origin', () => {
+    expect(resizeField(f, 0, 0)).toEqual(MIN_FIELD);
+  });
+
+  it('stops at the page edge', () => {
+    const r = resizeField(f, 2, 2);
+    expect(r.w).toBeCloseTo(0.8);
+    expect(r.h).toBeCloseTo(0.7);
+  });
+
+  it('keeps the shape locked with a ratio, driven by the larger drag', () => {
+    const r = resizeField(f, 0.5, 0.6, f.h / f.w); // height tripled, width unchanged
+    expect(r.h / r.w).toBeCloseTo(f.h / f.w);
+    expect(r.w).toBeCloseTo(0.8); // would be 0.9, clipped by the right edge
+  });
+
+  it('locked shape respects both edges and minimums', () => {
+    const sq = { x: 0.1, y: 0.8, w: 0.1, h: 0.1 };
+    const big = resizeField(sq, 1, 1, 1);
+    expect(big.h).toBeCloseTo(0.2);
+    expect(big.w).toBeCloseTo(0.2);
+    const tiny = resizeField(sq, 0, 0, 1);
+    expect(tiny.w).toBeCloseTo(MIN_FIELD.w);
+    expect(tiny.h).toBeCloseTo(MIN_FIELD.w);
   });
 });

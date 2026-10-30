@@ -1,6 +1,7 @@
 import { ApiError, api, fill, h, isEmail, pageLang, strings, toast } from './ui';
 import { renderPdf, type RenderedPage } from './pdfview';
 import { UploadCheckError, inspectUpload, uploadInit } from './pdfwork';
+import { resizeField } from '../lib/geometry';
 
 type FieldType = 'sig' | 'initial' | 'name' | 'date' | 'stamp';
 interface Field {
@@ -335,13 +336,11 @@ function renderFields() {
             changed();
           });
           el.appendChild(x);
+          const grip = h('span', { class: 'grip', role: 'button', 'aria-label': t.resize, title: t.resize });
+          grip.addEventListener('pointerdown', (e) => startResize(e, f, p, el));
+          el.appendChild(grip);
           el.addEventListener('pointerdown', (e) => startDrag(e, f, p));
-          el.addEventListener('keydown', (e) => {
-            if (e.key === 'Delete' || e.key === 'Backspace') {
-              state.fields = state.fields.filter((q) => q.id !== f.id);
-              changed();
-            }
-          });
+          el.addEventListener('keydown', (e) => onFieldKey(e, f, p));
           return el;
         })
     );
@@ -379,6 +378,73 @@ function startDrag(e: PointerEvent, f: Field, p: RenderedPage) {
   window.addEventListener('pointermove', mv);
   window.addEventListener('pointerup', up);
   window.addEventListener('pointercancel', up);
+}
+
+/** Seals keep their shape (round on the page); other fields resize freely unless Shift is held. */
+const lockedRatio = (f: Field, shift: boolean) => (f.type === 'stamp' || shift ? f.h / f.w : undefined);
+
+function startResize(e: PointerEvent, f: Field, p: RenderedPage, el: HTMLElement) {
+  if (e.button > 0) return;
+  e.stopPropagation();
+  e.preventDefault();
+  const r = p.el.getBoundingClientRect();
+  // Where inside the grip the pointer went down, so the corner doesn't jump.
+  const dx = (e.clientX - r.left) / r.width - (f.x + f.w);
+  const dy = (e.clientY - r.top) / r.height - (f.y + f.h);
+  const start = { x: f.x, y: f.y, w: f.w, h: f.h };
+  state.selected = f.id;
+  state.armed = null;
+  el.classList.add('sel', 'resizing');
+  let moved = false;
+  const mv = (ev: PointerEvent) => {
+    moved = true;
+    const right = (ev.clientX - r.left) / r.width - dx;
+    const bottom = (ev.clientY - r.top) / r.height - dy;
+    const size = resizeField(start, right, bottom, lockedRatio(f, ev.shiftKey));
+    f.w = size.w;
+    f.h = size.h;
+    el.style.width = `${f.w * 100}%`;
+    el.style.height = `${f.h * 100}%`;
+  };
+  const up = () => {
+    window.removeEventListener('pointermove', mv);
+    window.removeEventListener('pointerup', up);
+    window.removeEventListener('pointercancel', up);
+    if (moved) scheduleSave();
+    renderPlacePanel();
+    renderFields();
+  };
+  window.addEventListener('pointermove', mv);
+  window.addEventListener('pointerup', up);
+  window.addEventListener('pointercancel', up);
+}
+
+/** Delete removes; arrows nudge; Shift+arrows resize (1% of the page per press). */
+function onFieldKey(e: KeyboardEvent, f: Field, p: RenderedPage) {
+  if (e.key === 'Delete' || e.key === 'Backspace') {
+    state.fields = state.fields.filter((q) => q.id !== f.id);
+    changed();
+    return;
+  }
+  const dir = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+  if (!dir) return;
+  e.preventDefault();
+  const step = 0.01;
+  if (e.shiftKey) {
+    const ratio = f.type === 'stamp' ? f.h / f.w : undefined;
+    // For seals, any arrow grows (right/down) or shrinks (left/up) both axes together.
+    const grow = ratio ? (dir[0] || dir[1]) * step : 0;
+    const right = f.x + f.w + (ratio ? grow : dir[0] * step);
+    const bottom = f.y + f.h + (ratio ? grow * ratio : dir[1] * step * p.aspect);
+    Object.assign(f, resizeField(f, right, bottom, ratio));
+  } else {
+    f.x = Math.max(0, Math.min(1 - f.w, f.x + dir[0] * step));
+    f.y = Math.max(0, Math.min(1 - f.h, f.y + dir[1] * step * p.aspect));
+  }
+  state.selected = f.id;
+  scheduleSave();
+  renderFields();
+  document.querySelector<HTMLElement>(`.fld[data-id="${f.id}"]`)?.focus();
 }
 
 function onPageDown(e: PointerEvent, p: RenderedPage) {
