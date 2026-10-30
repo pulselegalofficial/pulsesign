@@ -3,7 +3,7 @@ import { fieldImage } from '../../../../../lib/docs';
 import { notFound, unauthorized } from '../../../../../lib/http';
 import { resolveSigner } from '../../../../../lib/signer-session';
 
-/** Another signer's signature or initials on the same document, after the OTP check. */
+/** Another signer's signature, initials or seal on the same document, after the OTP check. */
 export const GET: APIRoute = async ({ params, request }) => {
   const ctx = await resolveSigner(request, params.token!);
   if (!ctx) return notFound();

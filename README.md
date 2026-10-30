@@ -52,8 +52,8 @@ CI runs check, tests and build on every push and pull request.
 4. **Detail** (`/docs/:id`) shows the audit trail, signer progress and hashes,
    with remind, cancel, download and delete.
 5. **Delete** removes a document in any status, permanently: every R2 object
-   under `docs/<id>/` (original, signature images, signed PDF) and every D1
-   row (signers, fields, audit trail). Anything but a draft must be confirmed
+   under `docs/<id>/` (original, signature and seal images, signed PDF,
+   attachments) and every D1 row (signers, fields, attachments, audit trail). Anything but a draft must be confirmed
    by typing the document number. Signing and download links are revoked
    first, so a delete that fails half-way can simply be retried. Copies
    already emailed stay with the recipients and in Resend's logs.
@@ -67,7 +67,14 @@ CI runs check, tests and build on every push and pull request.
 4. **Sign**: draw, type or upload a signature; initials likewise. Name and
    date fields are filled by the server from the signer record and the
    server clock, so they cannot be edited or back-dated.
-5. Signers can **decline** with a reason; the request stops and the sender is
+5. **Company seal** (ตราประทับ), when the sender placed a seal field: the
+   signer uploads a photo or scan of the seal. The browser removes the paper
+   background (adjustable) and can recolour it red or blue; nothing heavy runs
+   on the Worker. The signer must name the entity the seal belongs to and tick
+   *I am authorised to sign and affix the seal on behalf of this entity*;
+   the server refuses the submission otherwise. One seal per signer is used
+   for all their seal fields.
+6. Signers can **decline** with a reason; the request stops and the sender is
    emailed.
 
 While signing, each signer sees what the others have already put on the
@@ -85,12 +92,59 @@ unless they switch with the toggle. A subject or message the sender typed is
 sent as written; the wizard's default subject and message are sent in each
 signer's language instead. Date fields are written as DD/MM/YYYY (Gregorian year, Bangkok time) for every signer.
 
+### Company seals
+
+A seal field is placed in the wizard like any other field (square by default,
+usually over or beside the signature). On the final PDF, seals are drawn last
+with a Multiply blend at 90% opacity, so the signature and text beneath stay
+legible, like ink pressed over a signature on paper. The evidence is:
+
+- a `stamped` event in the audit trail naming the entity (shown on `/verify`);
+- `signers.stamp_entity`, `stamp_sha256` (SHA-256 of the seal image) and
+  `stamp_authority_at` (when the signer confirmed their authority);
+- a *Company seal* line under the signer on the certificate, with the entity,
+  the authority confirmation time and the seal's SHA-256.
+
+The certificate shows the seal's hash, not a second copy of the seal image.
+
+### Folders
+
+On the dashboard, the **Completed** tab has a folder bar: all completed, not
+in a folder, and each folder with its count. Create a folder there or from a
+document's **Folder** button, and rename or delete it with **⋯**. A document
+page also has a folder picker. Folders are a label on the document row only:
+filing a document does not change its files, hashes, `updated_at` or audit
+trail, and nothing about folders reaches signers or `/verify`. Deleting a
+folder keeps its documents (they become unfiled). Only completed documents can
+be filed. The last tab and folder are remembered per browser tab.
+
+### Attachments
+
+A document page has an **Attachments** card for files the firm keeps with the
+document: supporting documents, receipts, correspondence. Up to 30 files of
+20 MB each, with an optional note.
+
+- They are stored beside the document in R2 (`docs/<id>/attachments/`), never
+  inside the signed PDF, so `hash_before` and `hash_final` do not change and
+  `/verify` keeps matching the signed file.
+- Staff only: signers never see them and `/verify` never returns them. For
+  that reason adding or removing one is not written to the audit trail (which
+  `/verify` shows to anyone holding the signed file); the attachment row keeps
+  who uploaded it and when.
+- The browser sends the file's SHA-256 and R2 checks it on upload, as for
+  PDFs. The hash is shown under each file.
+- PDFs, images and plain text open in the browser; every other type is always
+  downloaded. Non-PDF responses carry `Content-Security-Policy: sandbox`, so an
+  uploaded file can never run script on this origin.
+- Deleting a document deletes its attachments too.
+
 ### Completion and evidence
 
 When the last signer signs, the document is marked completed. Then every field
 is stamped onto the original PDF and a **certificate of completion** is
 appended (document facts, SHA-256 of the original, and each signer's
-signature, time, OTP verification and device). The certificate is always in English; names and the title stay as entered. The result
+signature, time, OTP verification and device, plus their company seal's
+entity, authority confirmation and SHA-256 when they sealed). The certificate is always in English; names and the title stay as entered. The result
 is stored in R2 and every signer and the sender get an email with it attached
 (Resend fetches the attachment from a 30-day download link).
 

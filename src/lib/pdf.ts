@@ -1,4 +1,5 @@
 import {
+  BlendMode,
   PDFDocument,
   PDFFont,
   PDFHexString,
@@ -207,6 +208,12 @@ export function wrapText(text: string, font: PDFFont, size: number, maxWidth: nu
   return out;
 }
 
+/**
+ * Seals go last so they print over signatures placed beneath them, the way a
+ * company seal is pressed over the director's signature on paper.
+ */
+const stampOrder = (a: FieldContent, b: FieldContent) => Number(a.field.type === 'stamp') - Number(b.field.type === 'stamp');
+
 /** Font size at which `text` fits the box: at most 62% of its height. */
 function fitTextSize(text: string, font: PDFFont, boxW: number, boxH: number): number {
   let size = Math.min(boxH * 0.62, 14);
@@ -216,7 +223,7 @@ function fitTextSize(text: string, font: PDFFont, boxW: number, boxH: number): n
 
 export interface FieldContent {
   field: FieldRow;
-  /** PNG bytes for signature and initials. */
+  /** PNG bytes for signature, initials and seal. */
   image?: Uint8Array;
   /** Text for name and date. */
   text?: string;
@@ -224,7 +231,7 @@ export interface FieldContent {
 
 async function stampFields(pdf: PDFDocument, contents: FieldContent[], fonts: Fonts): Promise<void> {
   const pages = pdf.getPages();
-  for (const { field, image, text } of contents) {
+  for (const { field, image, text } of [...contents].sort(stampOrder)) {
     const page = pages[field.page - 1];
     if (!page) continue;
     const crop = page.getCropBox();
@@ -233,8 +240,11 @@ async function stampFields(pdf: PDFDocument, contents: FieldContent[], fonts: Fo
     if (image) {
       const png = await pdf.embedPng(image);
       const fit = fitContain(png.width, png.height, p.width, p.height);
+      // A seal is printed like ink over the page: multiplied, so text and a
+      // signature beneath it stay readable instead of being covered.
+      const seal = field.type === 'stamp' ? { opacity: 0.9, blendMode: BlendMode.Multiply } : {};
       drawRotated(page, p, fit.dx, fit.dy, (x, y) =>
-        page.drawImage(png, { x, y, width: fit.width, height: fit.height, rotate: degrees(p.rotate) })
+        page.drawImage(png, { x, y, width: fit.width, height: fit.height, rotate: degrees(p.rotate), ...seal })
       );
     } else if (text) {
       const size = fitTextSize(text, fonts.regular, p.width, p.height);
@@ -393,7 +403,8 @@ async function appendCertificate(pdf: PDFDocument, fonts: Fonts, c: CertificateI
   text(t.certSigners, M, y - 12, 12, bold);
   y -= 22;
   for (const s of c.signers) {
-    const rowH = 66;
+    const sealH = s.stamp_sha256 ? 30 : 0;
+    const rowH = 66 + sealH;
     ensure(rowH);
     const top = y;
     page.drawCircle({ x: M + 10, y: top - 22, size: 10, color: MINT });
@@ -427,6 +438,24 @@ async function appendCertificate(pdf: PDFDocument, fonts: Fonts, c: CertificateI
       text(k, ex, top - 14 - i * 13, 7.5, regular, MUTED);
       text(wrapText(v, regular, 7.5, W - (ex - M) - 62)[0], ex + 62, top - 14 - i * 13, 7.5, regular, INK);
     });
+    if (s.stamp_sha256) {
+      // Company seal: who it was affixed for, the authority statement and the
+      // seal image's fingerprint. The image itself is on the stamped pages.
+      const sy = top - 66;
+      const entity = s.stamp_entity || '—';
+      const when = s.stamp_authority_at ? formatDate(s.stamp_authority_at, lang, { time: true }) : '—';
+      text(t.certSeal, M + 28, sy - 4, 7.5, regular, MUTED);
+      text(
+        wrapText(`${fill(t.certSealFor, { entity })} · ${fill(t.certSealAuthority, { time: when })}`, regular, 7.5, W - 90)[0],
+        M + 90,
+        sy - 4,
+        7.5,
+        regular,
+        INK
+      );
+      text(t.certSealHash, M + 28, sy - 17, 7.5, regular, MUTED);
+      text(s.stamp_sha256, M + 90, sy - 17, 7, mono, INK);
+    }
     y = top - rowH;
     page.drawLine({ start: { x: M, y: y + 6 }, end: { x: M + W, y: y + 6 }, thickness: 0.6, color: LINE });
   }

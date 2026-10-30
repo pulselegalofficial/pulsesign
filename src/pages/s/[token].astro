@@ -270,6 +270,56 @@ const clientConfig = ctx
             </div>
           </div>
         </div>
+
+        <div class="overlay sheet" id="stamp-sheet" hidden>
+          <div class="modal sig-modal">
+            <div class="sheet-head">
+              <h2>{t.yourStamp}</h2>
+              <button class="close" type="button" data-close aria-label={t.cancel}>×</button>
+            </div>
+            <p class="small muted stamp-sub">{t.stampSub}</p>
+            <label class="upload-box stamp-box" id="stamp-drop">
+              <input type="file" accept="image/png,image/jpeg,image/webp" id="stamp-file" class="sr-only" />
+              <canvas id="stamp-preview" hidden />
+              <span id="stamp-empty">
+                <strong>{t.stampPick}</strong>
+                <br />
+                <span class="small muted">{t.stampPickSub}</span>
+              </span>
+            </label>
+            <div class="stamp-tools" id="stamp-tools" hidden>
+              <div>
+                <span class="label">{t.stampInk}</span>
+                <div class="ink-row" role="radiogroup" aria-label={t.stampInk}>
+                  <button type="button" data-ink="original" class="on">{t.stampInkOriginal}</button>
+                  <button type="button" data-ink="red"><span class="ink-dot" style="background:#C41E2D" />{t.stampInkRed}</button>
+                  <button type="button" data-ink="blue"><span class="ink-dot" style="background:#1C3AA0" />{t.stampInkBlue}</button>
+                </div>
+              </div>
+              <div>
+                <label class="label" for="stamp-clean">{t.stampClean}</label>
+                <div class="clean-row">
+                  <span class="small faint">{t.stampCleanLess}</span>
+                  <input type="range" id="stamp-clean" min="0" max="100" value="40" />
+                  <span class="small faint">{t.stampCleanMore}</span>
+                </div>
+              </div>
+            </div>
+            <div class="field stamp-entity">
+              <label for="stamp-entity">{t.stampEntity}</label>
+              <input class="input" id="stamp-entity" maxlength="200" placeholder={t.stampEntityPh} autocomplete="organization" />
+            </div>
+            <label class="consent stamp-auth">
+              <input type="checkbox" id="stamp-authority" />
+              <span class="check">✓</span>
+              <span>{t.stampAuthority}</span>
+            </label>
+            <div class="sheet-actions">
+              <button class="btn btn-soft" type="button" data-close>{t.cancel}</button>
+              <button class="btn" type="button" id="adopt-stamp">{t.useStamp}</button>
+            </div>
+          </div>
+        </div>
       </>
     )
   }
@@ -657,6 +707,14 @@ const clientConfig = ctx
     max-height: 100%;
     object-fit: contain;
   }
+  :global(.sfld.stamp:not(.filled)) {
+    border-radius: 50%;
+  }
+  /* Seals print like ink: whatever is beneath stays visible. */
+  :global(.sfld.stamp img),
+  :global(.ofld.stamp img) {
+    mix-blend-mode: multiply;
+  }
   :global(.sfld .txt) {
     color: var(--ink);
     font-weight: 400;
@@ -818,6 +876,72 @@ const clientConfig = ctx
   }
   .sig-legal {
     margin: 14px 0;
+  }
+  .stamp-sub {
+    margin: 8px 0 14px;
+  }
+  .stamp-box {
+    height: 220px;
+    /* Checkerboard, so the removed background is visible as removed. */
+    background: repeating-conic-gradient(#f1f6f3 0% 25%, #fff 0% 50%) 50% / 18px 18px;
+  }
+  .stamp-box canvas {
+    max-width: 100%;
+    max-height: 100%;
+  }
+  .stamp-tools {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-top: 14px;
+  }
+  .ink-row {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-top: 6px;
+  }
+  .ink-row button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1.5px solid var(--mint-line);
+    background: #fff;
+    border-radius: 999px;
+    padding: 6px 12px;
+    font-weight: 600;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .ink-row button.on {
+    border-color: var(--forest);
+    background: var(--mint-2);
+  }
+  .ink-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+  }
+  .clean-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+  }
+  .clean-row input {
+    flex: 1;
+    accent-color: var(--forest);
+  }
+  .stamp-entity {
+    margin-top: 16px;
+  }
+  .stamp-auth {
+    margin: 14px 0 4px;
+  }
+  @media (max-width: 560px) {
+    .stamp-tools {
+      grid-template-columns: 1fr;
+    }
   }
   .sheet-actions {
     display: flex;

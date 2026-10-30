@@ -2,7 +2,7 @@ import { ApiError, api, fill, h, isEmail, pageLang, strings, toast } from './ui'
 import { renderPdf, type RenderedPage } from './pdfview';
 import { UploadCheckError, inspectUpload, uploadInit } from './pdfwork';
 
-type FieldType = 'sig' | 'initial' | 'name' | 'date';
+type FieldType = 'sig' | 'initial' | 'name' | 'date' | 'stamp';
 interface Field {
   id: string;
   signer: number;
@@ -45,8 +45,11 @@ const SIZE: Record<FieldType, { w: number; h: number }> = {
   initial: { w: 0.14, h: 0.065 },
   date: { w: 0.22, h: 0.055 },
   name: { w: 0.34, h: 0.055 },
+  // Square: seals are round. Typically placed over or beside a signature.
+  stamp: { w: 0.16, h: 0.16 },
 };
-const TYPE_LABEL: Record<FieldType, string> = { sig: t.fSig, initial: t.fInitial, date: t.fDate, name: t.fName };
+const TYPE_LABEL: Record<FieldType, string> = { sig: t.fSig, initial: t.fInitial, date: t.fDate, name: t.fName, stamp: t.fStamp };
+const TOOL_TYPES: FieldType[] = ['sig', 'initial', 'name', 'date', 'stamp'];
 const COLORS = [
   { bg: '#CFE7D8', b: '#00412F', dot: '#7FC29C' },
   { bg: '#FFE3CC', b: '#FF7A12', dot: '#FFB27A' },
@@ -264,7 +267,7 @@ function renderPlacePanel() {
       const c = color(i);
       const mine = state.fields.filter((f) => f.signer === i);
       const hasSig = mine.some((f) => f.type === 'sig');
-      const parts = (['sig', 'initial', 'name', 'date'] as FieldType[])
+      const parts = TOOL_TYPES
         .map((k) => {
           const n = mine.filter((f) => f.type === k).length;
           return n ? `${TYPE_LABEL[k]} ${n}` : null;
@@ -272,7 +275,7 @@ function renderPlacePanel() {
         .filter(Boolean);
       const status = !mine.length ? t.noFields : parts.join(' · ') + (hasSig ? '' : ` · ${t.noSig}`);
       const armedHere = state.armed?.signer === i;
-      const tools = (['sig', 'initial', 'name', 'date'] as FieldType[]).map((k) => {
+      const tools = TOOL_TYPES.map((k) => {
         const on = armedHere && state.armed!.type === k;
         const b = h('button', { type: 'button', style: on ? `background:${c.bg};border-color:${c.b}` : undefined, 'aria-pressed': on ? 'true' : 'false' }, `+ ${TYPE_LABEL[k]}`);
         b.addEventListener('click', () => {
@@ -316,7 +319,7 @@ function renderFields() {
           const el = h(
             'div',
             {
-              class: `fld${sel ? ' sel' : ''}`,
+              class: `fld${sel ? ' sel' : ''}${f.type === 'stamp' ? ' stamp' : ''}`,
               style: `left:${f.x * 100}%;top:${f.y * 100}%;width:${f.w * 100}%;height:${f.h * 100}%;background:${c.bg}cc;border-color:${c.b};${sel ? `box-shadow:0 0 0 3px ${c.dot}` : ''}`,
               'data-id': f.id,
               tabindex: 0,

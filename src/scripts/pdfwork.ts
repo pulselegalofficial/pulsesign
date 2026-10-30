@@ -4,7 +4,7 @@
  * It uses the same code the Worker would (src/lib/pdf.ts), loaded on demand.
  */
 import { api } from './ui';
-import type { DocumentRow, EventRow, FieldRow, SignerRow } from '../lib/types';
+import { isImageField, type DocumentRow, type EventRow, type FieldRow, type SignerRow } from '../lib/types';
 
 export async function sha256Hex(bytes: Uint8Array): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', bytes as BufferSource);
@@ -49,7 +49,10 @@ export function uploadInit(file: File, checked: { bytes: Uint8Array; pages: numb
 
 interface FinalizeData {
   doc: Pick<DocumentRow, 'id' | 'title' | 'pages' | 'lang' | 'hash_before' | 'created_at' | 'completed_at'>;
-  signers: Pick<SignerRow, 'id' | 'position' | 'name' | 'email' | 'signed_at' | 'otp_verified_at' | 'ip' | 'user_agent'>[];
+  signers: Pick<
+    SignerRow,
+    'id' | 'position' | 'name' | 'email' | 'signed_at' | 'otp_verified_at' | 'ip' | 'user_agent' | 'stamp_entity' | 'stamp_sha256' | 'stamp_authority_at'
+  >[];
   events: Pick<EventRow, 'type' | 'at' | 'actor_name' | 'detail' | 'ip'>[];
   fields: (Pick<FieldRow, 'id' | 'signer_pos' | 'type' | 'page' | 'x' | 'y' | 'w' | 'h'> & { value: string | null })[];
   senderName: string;
@@ -76,7 +79,7 @@ export async function finalizeDocument(id: string): Promise<void> {
   const signatures = new Map<number, Uint8Array>();
   for (const f of data.fields) {
     const field = { ...f, doc_id: id, filled_at: null } as FieldRow;
-    if (f.type === 'sig' || f.type === 'initial') {
+    if (isImageField(f.type)) {
       const image = await fetchBytes(`/api/docs/${id}/field-image/${encodeURIComponent(f.id)}`);
       contents.push({ field, image });
       if (f.type === 'sig' && !signatures.has(f.signer_pos)) signatures.set(f.signer_pos, image);

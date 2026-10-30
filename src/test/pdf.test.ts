@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PDFDocument, degrees } from 'pdf-lib';
+import { PDFDict, PDFDocument, PDFName, degrees } from 'pdf-lib';
 import { writeFileSync } from 'node:fs';
 import { buildSignedPdf, inspectPdf, wrapText, PdfError } from '../lib/pdf';
 import type { DocumentRow, EventRow, FieldRow, SignerRow } from '../lib/types';
@@ -22,13 +22,14 @@ const doc: DocumentRow = {
   id: 'PS-2569-0001', owner_email: 'n@pulselegal.co', title: 'สัญญาว่าจ้างที่ปรึกษากฎหมาย – บจก. สยามฟู้ดส์ ฉบับที่มีชื่อยาวมากเพื่อทดสอบการตัดบรรทัด',
   file_name: 'a.pdf', file_key: 'k', file_size: 1, pages: 2, lang: 'th', status: 'completed', sequential: 1,
   subject: '', message: '', expiry_days: 14, hash_before: 'a'.repeat(64), hash_final: null, final_key: null, final_token_hash: null, final_token_expires: null,
-  created_at: now, updated_at: now, sent_at: now, expires_at: now, completed_at: now + 60_000,
+  created_at: now, updated_at: now, sent_at: now, expires_at: now, completed_at: now + 60_000, folder_id: null,
 };
 const signer = (position: number, name: string, email: string): SignerRow => ({
   id: `sgn_${position}abcdefgh`, doc_id: doc.id, position, name, email, lang: 'th', status: 'signed', token_hash: null, otp_hash: null,
   otp_expires_at: null, otp_attempts: 0, otp_sent_count: 1, otp_last_sent_at: now, session_hash: null, session_expires: null,
   otp_verified_at: now, consent_at: now, signed_at: now + 30_000, declined_at: null, decline_reason: null, ip: '49.228.47.112',
   user_agent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) Safari/604.1',
+  stamp_entity: null, stamp_sha256: null, stamp_authority_at: null,
 });
 const field = (id: string, type: FieldRow['type'], page: number): FieldRow => ({
   id, doc_id: doc.id, signer_pos: 0, type, page, x: 0.1, y: 0.7, w: 0.3, h: 0.06, value: 'x', filled_at: now,
@@ -66,6 +67,28 @@ describe('buildSignedPdf', () => {
     expect(result.getPageCount()).toBe(3);
     expect(result.getPage(1).getRotation().angle).toBe(90);
     if (process.env.PDF_OUT) writeFileSync(process.env.PDF_OUT, out);
+  });
+});
+
+describe('company seal', () => {
+  it('prints the seal over the page and its evidence on the certificate', async () => {
+    const sealed = { ...signer(0, 'สมชาย ใจดี', 'somchai@siamfoods.co.th'), stamp_entity: 'บริษัท สยามฟู้ดส์ จำกัด', stamp_sha256: 'b'.repeat(64), stamp_authority_at: now };
+    const STAMP = process.env.STAMP_PNG ? new Uint8Array((await import('node:fs')).readFileSync(process.env.STAMP_PNG)) : PNG;
+    const SIG = process.env.SIG_PNG ? new Uint8Array((await import('node:fs')).readFileSync(process.env.SIG_PNG)) : PNG;
+    const stampField = { ...field('s1', 'stamp', 1), x: 0.12, y: 0.62, w: 0.2, h: 0.14 };
+    const out = await buildSignedPdf(
+      await samplePdf(),
+      // The seal is listed first but must be drawn after (over) the signature.
+      [{ field: stampField, image: STAMP }, { field: field('f1', 'sig', 1), image: SIG }],
+      { doc, signers: [sealed, signer(1, 'B', 'b@example.com')], events: [], signatures: new Map([[0, SIG]]), senderName: 'A', orgName: 'Pulse Legal', verifyUrl: 'https://sign.pulselegal.co/verify' }
+    );
+    const result = await PDFDocument.load(out);
+    expect(result.getPageCount()).toBe(3);
+    // The seal is drawn with a Multiply blend so text beneath stays legible.
+    const gs = result.getPage(0).node.Resources()!.lookup(PDFName.of('ExtGState'), PDFDict);
+    const modes = gs.values().map((v) => String(result.context.lookup(v, PDFDict).get(PDFName.of('BM'))));
+    expect(modes).toContain('/Multiply');
+    if (process.env.SEAL_OUT) (await import('node:fs')).writeFileSync(process.env.SEAL_OUT, out);
   });
 });
 

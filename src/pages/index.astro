@@ -2,13 +2,14 @@
 import App from '../layouts/App.astro';
 import StatusChip from '../components/StatusChip.astro';
 import { dict } from '../lib/i18n';
-import { listDocs } from '../lib/docs';
+import { listDocs, listFolders } from '../lib/docs';
 import { formatDate } from '../lib/format';
 import type { DocStatus } from '../lib/types';
 
 const lang = Astro.locals.lang;
 const t = dict(lang);
-const docs = await listDocs();
+const [docs, folders] = await Promise.all([listDocs(), listFolders()]);
+const folderName = new Map(folders.map((f) => [f.id, f.name]));
 const STATUSES: DocStatus[] = ['draft', 'sent', 'opened', 'completed', 'declined', 'cancelled', 'expired'];
 const counts = Object.fromEntries(STATUSES.map((s) => [s, docs.filter((d) => d.status === s).length]));
 const tabs = [{ key: 'all', label: t.all, count: docs.length }, ...STATUSES.filter((s) => counts[s] > 0 || ['draft', 'sent', 'opened', 'completed'].includes(s)).map((s) => ({ key: s, label: (t as Record<string, string>)[`st_${s}`], count: counts[s] }))];
@@ -25,6 +26,9 @@ const rows = docs.map((d) => {
     updated: formatDate(d.updated_at, lang, { time: true }),
     updatedShort: formatDate(d.updated_at, lang),
     canRemind: d.status === 'sent' || d.status === 'opened',
+    canFile: d.status === 'completed',
+    folder: d.status === 'completed' && d.folder_id && folderName.has(d.folder_id) ? d.folder_id : '',
+    folderLabel: d.status === 'completed' && d.folder_id ? folderName.get(d.folder_id) || '' : '',
     search: `${d.title} ${d.id} ${d.signers.map((s) => s.name + ' ' + s.email).join(' ')}`.toLowerCase(),
   };
 });
@@ -53,6 +57,7 @@ const rows = docs.map((d) => {
       ))
     }
   </div>
+  <div class="folder-bar" id="folder-bar" hidden aria-label={t.folders}></div>
 
   {
     docs.length === 0 ? (
@@ -70,10 +75,19 @@ const rows = docs.map((d) => {
           <span />
         </div>
         {rows.map((d) => (
-          <div class="row doc" data-status={d.status} data-search={d.search}>
+          <div class="row doc" data-id={d.id} data-title={d.title} data-status={d.status} data-folder={d.folder} data-search={d.search}>
             <span class="title-cell">
               <a class="stretched" href={d.href}>{d.title}</a>
-              <span class="mono faint small">{d.id}</span>
+              <span class="sub-line">
+                <span class="mono faint small">{d.id}</span>
+                <span class="folder-tag small" data-folder-tag hidden={!d.folderLabel}>{d.folderLabel}</span>
+                {d.attachments > 0 && (
+                  <span class="att-tag small faint" title={t.attachments}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5l-8.6 8.6a5.5 5.5 0 01-7.8-7.8l9-9a3.7 3.7 0 015.2 5.2l-9 9a1.8 1.8 0 01-2.6-2.6l8.3-8.3" /></svg>
+                    {d.attachments}
+                  </span>
+                )}
+              </span>
             </span>
             <span class="status-cell">
               <StatusChip status={d.status} />
@@ -86,7 +100,15 @@ const rows = docs.map((d) => {
               <span class="long">{d.updated}</span>
               <span class="short">{d.prog} · {d.updatedShort}</span>
             </span>
-            <span class="act-cell">{d.canRemind && <button type="button" class="btn btn-soft btn-sm" data-remind={d.id}>{t.resend}</button>}</span>
+            <span class="act-cell">
+              {d.canRemind && <button type="button" class="btn btn-soft btn-sm" data-remind={d.id}>{t.resend}</button>}
+              {d.canFile && (
+                <button type="button" class="btn btn-soft btn-sm" data-move={d.id} title={t.folderMove}>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" /></svg>
+                  {t.folderLabel}
+                </button>
+              )}
+            </span>
           </div>
         ))}
         <p class="empty faint" id="empty" hidden>{t.empty}</p>
@@ -94,11 +116,45 @@ const rows = docs.map((d) => {
     )
   }
   <div class="toast" id="toast" hidden></div>
+
+  <div class="overlay" id="move-dialog" hidden>
+    <div class="modal move-modal">
+      <h2 id="move-title"></h2>
+      <div class="move-list" id="move-list" role="listbox" aria-label={t.folders}></div>
+      <form class="move-new" id="move-new">
+        <input class="input" id="move-new-name" maxlength="80" placeholder={t.folderName} autocomplete="off" />
+        <button class="btn btn-soft" type="submit">+ {t.folderNew}</button>
+      </form>
+      <div class="dialog-actions">
+        <button class="btn btn-soft" type="button" data-close>{t.cancel}</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay" id="name-dialog" hidden>
+    <form class="modal" id="name-form">
+      <h2 id="name-title"></h2>
+      <div class="field" style="margin-top:16px">
+        <label for="name-input">{t.folderName}</label>
+        <input class="input" id="name-input" maxlength="80" autocomplete="off" required />
+      </div>
+      <div class="dialog-actions">
+        <button class="btn btn-danger name-delete" type="button" id="name-delete" hidden>{t.folderDelete}</button>
+        <button class="btn btn-soft" type="button" data-close>{t.cancel}</button>
+        <button class="btn" type="submit" id="name-submit">{t.save}</button>
+      </div>
+    </form>
+  </div>
+  <script type="application/json" id="folders-data" set:html={JSON.stringify(folders.map((f) => ({ id: f.id, name: f.name }))).replace(/</g, '\\u003c')} />
 </App>
 
 <script>
-  import { strings, toast } from '../scripts/ui';
+  import { ApiError, api, fill, h, strings, toast } from '../scripts/ui';
   const t = strings();
+  type Folder = { id: string; name: string };
+  let folders: Folder[] = JSON.parse(document.getElementById('folders-data')!.textContent || '[]');
+  // '' = all completed, '-' = not in a folder, otherwise a folder id.
+  let folder = '';
   const deleted = new URLSearchParams(location.search).get('deleted');
   if (deleted) {
     toast(t.deletedToast.replace('{id}', deleted));
@@ -127,28 +183,221 @@ const rows = docs.map((d) => {
   let filter = 'all';
   const q = document.getElementById('q') as HTMLInputElement;
   const rows = [...document.querySelectorAll<HTMLElement>('.row.doc')];
+  const errText = (e: unknown) => (e instanceof ApiError && t[e.code] ? t[e.code] : t.errGeneric);
+  const byName = (a: Folder, b: Folder) => a.name.localeCompare(b.name, 'th');
+
+  /** Remembers the tab and folder for this browser tab, so coming back from a document lands in the same place. */
+  function remember() {
+    try {
+      sessionStorage.setItem('dash', JSON.stringify({ filter, folder }));
+    } catch {
+      /* storage unavailable */
+    }
+  }
+
   function apply() {
     const term = q.value.trim().toLowerCase();
     let shown = 0;
     for (const r of rows) {
-      const ok = (filter === 'all' || r.dataset.status === filter) && (!term || r.dataset.search!.includes(term));
+      const inFolder = filter !== 'completed' || !folder || (folder === '-' ? !r.dataset.folder : r.dataset.folder === folder);
+      const ok = (filter === 'all' || r.dataset.status === filter) && inFolder && (!term || r.dataset.search!.includes(term));
       r.hidden = !ok;
       if (ok) shown++;
+      // The folder name is shown on rows unless you are already looking inside that folder.
+      const tag = r.querySelector<HTMLElement>('[data-folder-tag]');
+      if (tag) tag.hidden = !r.dataset.folder || (filter === 'completed' && folder === r.dataset.folder);
     }
     const empty = document.getElementById('empty');
     if (empty) empty.hidden = shown > 0;
+    renderFolderBar();
+    remember();
+  }
+
+  function renderFolderBar() {
+    const bar = document.getElementById('folder-bar')!;
+    bar.hidden = filter !== 'completed';
+    if (bar.hidden) return;
+    const done = rows.filter((r) => r.dataset.status === 'completed');
+    const count = (id: string) => done.filter((r) => (id === '-' ? !r.dataset.folder : !id || r.dataset.folder === id)).length;
+    const chip = (id: string, label: string, icon: boolean) => {
+      const on = folder === id;
+      const b = h(
+        'button',
+        { type: 'button', class: `fchip${on ? ' on' : ''}`, 'aria-pressed': on ? 'true' : 'false' },
+        icon ? folderIcon() : null,
+        h('span', { class: 'fname', text: label }),
+        h('span', { class: 'count', text: String(count(id)) })
+      );
+      b.addEventListener('click', () => {
+        folder = id;
+        apply();
+      });
+      return b;
+    };
+    const items: Node[] = [chip('', t.folderAll, false), chip('-', t.folderNone, false), ...folders.map((f) => chip(f.id, f.name, true))];
+    const current = folders.find((f) => f.id === folder);
+    if (current) {
+      const edit = h('button', { type: 'button', class: 'fchip ghost', title: `${t.folderRename} / ${t.folderDelete}` }, '⋯');
+      edit.addEventListener('click', () => openName(current));
+      items.push(edit);
+    }
+    const add = h('button', { type: 'button', class: 'fchip add' }, `+ ${t.folderNew}`);
+    add.addEventListener('click', () => openName(null));
+    items.push(add);
+    bar.replaceChildren(...items);
+  }
+
+  function folderIcon() {
+    const span = h('span', { class: 'ficon', 'aria-hidden': 'true' });
+    span.innerHTML =
+      '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>';
+    return span;
+  }
+
+  function setTab(key: string) {
+    const b = document.querySelector<HTMLButtonElement>(`.tab[data-tab="${key}"]`);
+    if (!b) return;
+    filter = key;
+    document.querySelectorAll('.tab').forEach((x) => {
+      x.classList.toggle('on', x === b);
+      x.setAttribute('aria-selected', String(x === b));
+    });
   }
   q.addEventListener('input', apply);
   document.querySelectorAll<HTMLButtonElement>('.tab').forEach((b) =>
     b.addEventListener('click', () => {
-      filter = b.dataset.tab!;
-      document.querySelectorAll('.tab').forEach((x) => {
-        x.classList.toggle('on', x === b);
-        x.setAttribute('aria-selected', String(x === b));
-      });
+      setTab(b.dataset.tab!);
       apply();
     })
   );
+  try {
+    const saved = JSON.parse(sessionStorage.getItem('dash') || 'null');
+    if (saved?.filter) setTab(saved.filter);
+    if (typeof saved?.folder === 'string' && (saved.folder === '' || saved.folder === '-' || folders.some((f) => f.id === saved.folder))) folder = saved.folder;
+  } catch {
+    /* storage unavailable */
+  }
+  apply();
+
+  // ─── Create, rename and delete folders ───
+  const nameDialog = document.getElementById('name-dialog')!;
+  const nameInput = document.getElementById('name-input') as HTMLInputElement;
+  const nameDelete = document.getElementById('name-delete') as HTMLButtonElement;
+  let editing: Folder | null = null;
+  /** Called with the new folder after "create" from the move dialog. */
+  let onCreated: ((f: Folder) => void) | null = null;
+  function openName(f: Folder | null, created?: (f: Folder) => void) {
+    editing = f;
+    onCreated = created || null;
+    document.getElementById('name-title')!.textContent = f ? t.folderRename : t.folderNew;
+    (document.getElementById('name-submit') as HTMLButtonElement).textContent = f ? t.save : t.folderCreate;
+    nameDelete.hidden = !f;
+    nameInput.value = f?.name || '';
+    nameDialog.hidden = false;
+    nameInput.focus();
+  }
+  nameDialog.addEventListener('click', (e) => {
+    if (e.target === nameDialog || (e.target as HTMLElement).closest('[data-close]')) nameDialog.hidden = true;
+  });
+  async function createFolder(name: string): Promise<Folder> {
+    const f = await api<Folder>('/api/folders', { method: 'POST', json: { name } });
+    folders = [...folders, f].sort(byName);
+    return f;
+  }
+  document.getElementById('name-form')!.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = nameInput.value.trim();
+    if (!name) return toast(t.folderNeedName, true);
+    try {
+      if (editing) {
+        await api(`/api/folders/${editing.id}`, { method: 'PATCH', json: { name } });
+        editing.name = name;
+        folders.sort(byName);
+        rows.forEach((r) => {
+          const tag = r.querySelector('[data-folder-tag]');
+          if (tag && r.dataset.folder === editing!.id) tag.textContent = name;
+        });
+      } else {
+        const f = await createFolder(name);
+        if (onCreated) onCreated(f);
+        else folder = f.id;
+      }
+      nameDialog.hidden = true;
+      apply();
+    } catch (err) {
+      toast(errText(err), true);
+    }
+  });
+  nameDelete.addEventListener('click', async () => {
+    if (!editing || !confirm(fill(t.folderDeleteBody, { name: editing.name }))) return;
+    try {
+      await api(`/api/folders/${editing.id}`, { method: 'DELETE' });
+      const gone = editing.id;
+      folders = folders.filter((f) => f.id !== gone);
+      rows.forEach((r) => {
+        if (r.dataset.folder === gone) r.dataset.folder = '';
+      });
+      folder = '';
+      nameDialog.hidden = true;
+      apply();
+    } catch (err) {
+      toast(errText(err), true);
+    }
+  });
+
+  // ─── Move a document into a folder ───
+  const moveDialog = document.getElementById('move-dialog')!;
+  let moving: HTMLElement | null = null;
+  function renderMoveList() {
+    const current = moving?.dataset.folder || '';
+    const option = (id: string, label: string, icon: boolean) => {
+      const b = h('button', { type: 'button', class: `move-opt${current === id ? ' on' : ''}`, role: 'option', 'aria-selected': current === id ? 'true' : 'false' }, icon ? folderIcon() : null, h('span', { text: label }));
+      b.addEventListener('click', () => void moveTo(id));
+      return b;
+    };
+    document.getElementById('move-list')!.replaceChildren(option('', t.folderNone, false), ...folders.map((f) => option(f.id, f.name, true)));
+  }
+  async function moveTo(id: string) {
+    if (!moving) return;
+    const row = moving;
+    try {
+      await api(`/api/docs/${row.dataset.id}/folder`, { method: 'PUT', json: { folderId: id || null } });
+      row.dataset.folder = id;
+      const tag = row.querySelector('[data-folder-tag]');
+      const name = folders.find((f) => f.id === id)?.name || '';
+      if (tag) tag.textContent = name;
+      moveDialog.hidden = true;
+      toast(id ? fill(t.folderMoved, { name }) : t.folderUnfiled);
+      apply();
+    } catch (err) {
+      toast(errText(err), true);
+    }
+  }
+  document.querySelectorAll<HTMLButtonElement>('[data-move]').forEach((b) =>
+    b.addEventListener('click', () => {
+      moving = b.closest<HTMLElement>('.row.doc');
+      if (!moving) return;
+      document.getElementById('move-title')!.textContent = fill(t.folderMoveTitle, { title: moving.dataset.title || '' });
+      (document.getElementById('move-new-name') as HTMLInputElement).value = '';
+      renderMoveList();
+      moveDialog.hidden = false;
+    })
+  );
+  moveDialog.addEventListener('click', (e) => {
+    if (e.target === moveDialog || (e.target as HTMLElement).closest('[data-close]')) moveDialog.hidden = true;
+  });
+  document.getElementById('move-new')!.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const input = document.getElementById('move-new-name') as HTMLInputElement;
+    const name = input.value.trim();
+    if (!name) return toast(t.folderNeedName, true);
+    try {
+      const f = await createFolder(name);
+      await moveTo(f.id);
+    } catch (err) {
+      toast(errText(err), true);
+    }
+  });
   document.querySelectorAll<HTMLButtonElement>('[data-remind]').forEach((b) =>
     b.addEventListener('click', async (e) => {
       b.disabled = true;
@@ -225,13 +474,140 @@ const rows = docs.map((d) => {
     background: var(--forest);
     color: #fff;
   }
+  .folder-bar {
+    display: flex;
+    gap: 8px;
+    margin: -8px 0 18px;
+    flex-wrap: wrap;
+  }
+  :global(.fchip) {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1.5px solid var(--mint-line);
+    background: transparent;
+    color: var(--ink-2);
+    font-weight: 600;
+    font-size: 13px;
+    padding: 6px 12px;
+    border-radius: 12px;
+    cursor: pointer;
+    max-width: 260px;
+  }
+  :global(.fchip .fname) {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  :global(.fchip .count) {
+    font-size: 12px;
+    opacity: 0.65;
+  }
+  :global(.fchip.on) {
+    background: var(--mint);
+    border-color: var(--forest);
+    color: var(--forest);
+  }
+  :global(.fchip.add) {
+    border-style: dashed;
+    color: var(--muted);
+  }
+  :global(.fchip.ghost) {
+    padding: 6px 10px;
+  }
+  :global(.ficon) {
+    display: inline-flex;
+    flex: none;
+  }
+  .sub-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+  .folder-tag {
+    background: var(--mint);
+    color: var(--forest);
+    border-radius: 6px;
+    padding: 0 7px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 160px;
+  }
+  .folder-tag[hidden] {
+    display: none;
+  }
+  .att-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+  }
+  .act-cell {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+  }
+  .act-cell .btn svg {
+    margin-right: 4px;
+  }
+  .move-modal {
+    max-width: 440px;
+  }
+  .move-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 16px 0 12px;
+    max-height: 320px;
+    overflow-y: auto;
+  }
+  :global(.move-opt) {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    text-align: left;
+    border: 1.5px solid var(--mint-line);
+    background: #fff;
+    border-radius: 14px;
+    padding: 11px 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  :global(.move-opt:hover) {
+    background: var(--mint-3);
+  }
+  :global(.move-opt.on) {
+    border-color: var(--forest);
+    background: var(--mint-2);
+  }
+  .move-new {
+    display: flex;
+    gap: 8px;
+  }
+  .move-new .input {
+    flex: 1;
+  }
+  .move-new .btn {
+    white-space: nowrap;
+  }
+  .dialog-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+    margin-top: 18px;
+  }
+  .name-delete {
+    margin-right: auto;
+  }
   .list {
     padding: 0;
     overflow: hidden;
   }
   .row {
     display: grid;
-    grid-template-columns: minmax(0, 2.2fr) 140px minmax(0, 1.2fr) 170px 120px;
+    grid-template-columns: minmax(0, 2.2fr) 140px minmax(0, 1.2fr) 170px 130px;
     gap: 16px;
     align-items: center;
     padding: 16px 22px;
