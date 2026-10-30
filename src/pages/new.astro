@@ -543,6 +543,35 @@ const steps = [t.ws1, t.ws2, t.ws3, t.ws4];
   :global(.fld.sel .x) {
     display: block;
   }
+  /* Resize grip: bottom-right corner, only on the selected field. */
+  :global(.fld .grip) {
+    position: absolute;
+    right: -9px;
+    bottom: -9px;
+    width: 18px;
+    height: 18px;
+    border-radius: 5px;
+    background: #fff;
+    border: 2px solid currentColor;
+    color: var(--ink);
+    cursor: nwse-resize;
+    touch-action: none;
+    display: none;
+    padding: 0;
+    overflow: visible;
+  }
+  /* Bigger invisible hit area for fingers. */
+  :global(.fld .grip)::after {
+    content: '';
+    position: absolute;
+    inset: -10px;
+  }
+  :global(.fld.sel .grip) {
+    display: block;
+  }
+  :global(.fld.resizing) {
+    cursor: nwse-resize;
+  }
   :global(.pdf-page) {
     container-type: inline-size;
   }
